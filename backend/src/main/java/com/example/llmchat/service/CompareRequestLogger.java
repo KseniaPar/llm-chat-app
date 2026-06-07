@@ -27,6 +27,35 @@ public class CompareRequestLogger {
                 .enable(SerializationFeature.INDENT_OUTPUT);
     }
 
+    public String logTemperatureCompareStart(String prompt) {
+        StringBuilder block = new StringBuilder();
+        appendLine(block, LINE);
+        appendLine(block, "COMPARE - Day 4 (3 temperature values)");
+        appendLine(block, "User prompt: \"" + prompt + "\"");
+        appendLine(block, LINE);
+        return block.toString();
+    }
+
+    public String logTemperatureSummary(
+            int temp0Len,
+            int temp07Len,
+            int temp12Len,
+            int comparisonLen) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("temp0", temp0Len);
+        summary.put("temp07", temp07Len);
+        summary.put("temp12", temp12Len);
+        summary.put("comparison", comparisonLen);
+
+        StringBuilder block = new StringBuilder();
+        appendLine(block, "");
+        appendLine(block, "=== SUMMARY (response length in chars) ===");
+        appendLine(block, toPrettyJson(summary));
+        appendLine(block, LINE);
+        appendLine(block, "");
+        return block.toString();
+    }
+
     public String logCompareStart(String prompt) {
         StringBuilder block = new StringBuilder();
         appendLine(block, LINE);
@@ -119,6 +148,9 @@ public class CompareRequestLogger {
         body.put("model", model);
         body.put("messages", toMessageMaps(messages));
 
+        if (options != null && options.getTemperature() != null) {
+            body.put("temperature", options.getTemperature());
+        }
         if (options != null && options.getMaxTokens() != null) {
             body.put("max_tokens", options.getMaxTokens());
         }

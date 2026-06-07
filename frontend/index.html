@@ -3,37 +3,37 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 3 — Разные способы рассуждения</title>
+  <title>День 4 — Сравнение temperature</title>
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
   <main class="container">
     <header class="header">
-      <h1>День 3 — Разные способы рассуждения</h1>
-      <p class="subtitle">Одна логическая задача — 4 способа решения + автоматическое сравнение.</p>
+      <h1>День 4 — Сравнение temperature</h1>
+      <p class="subtitle">Один и тот же запрос с temperature = 0, 0.7 и 1.2 — сравнение точности, креативности и разнообразия.</p>
     </header>
 
     <section class="chat-card">
-      <label for="prompt" class="label">Логическая задача</label>
+      <label for="prompt" class="label">Запрос к LLM</label>
       <textarea
         id="prompt"
         class="prompt-input"
         rows="4"
-        placeholder="У Ани, Бори и Вити разные профессии: инженер, врач, учитель. Аня не врач. Боря не инженер. Витя — учитель. Кто кем работает?"
+        placeholder="Кратко: 3 факта о пользе сна и одна метафора для детей."
       ></textarea>
 
       <div class="demo-section">
         <span class="demo-label">Примеры для демо</span>
-        <div class="demo-buttons" role="group" aria-label="Примеры логических задач">
-          <button type="button" class="demo-btn" data-demo="professions">Профессии</button>
-          <button type="button" class="demo-btn" data-demo="knights">Рыцари и лжецы</button>
-          <button type="button" class="demo-btn" data-demo="ages">Возраст</button>
-          <button type="button" class="demo-btn" data-demo="switches">Лампы</button>
+        <div class="demo-buttons" role="group" aria-label="Примеры запросов">
+          <button type="button" class="demo-btn" data-demo="sleep">Польза сна</button>
+          <button type="button" class="demo-btn" data-demo="startup">Название стартапа</button>
+          <button type="button" class="demo-btn" data-demo="quantum">Квантовая запутанность</button>
+          <button type="button" class="demo-btn" data-demo="water">Пить воду</button>
         </div>
       </div>
 
       <div class="actions">
-        <button id="send-btn" class="send-btn" type="button">Сравнить</button>
+        <button id="send-btn" class="send-btn" type="button">Сравнить temperature</button>
         <span id="loading" class="loading hidden" aria-live="polite">Думаю...</span>
       </div>
 
@@ -41,45 +41,49 @@
 
       <div class="workspace">
         <div class="responses-panel">
-          <div class="compare-grid">
+          <div class="compare-grid compare-grid--temp">
             <div class="response-section">
-              <h2 class="response-title">Прямой ответ</h2>
-              <p class="hint">Без дополнительных инструкций</p>
-              <div id="response-direct" class="response-box">Ответ появится здесь.</div>
+              <h2 class="response-title">temperature = 0</h2>
+              <p class="hint">Минимальная случайность — максимальная предсказуемость</p>
+              <div id="response-temp-0" class="response-box response-box--temp-0">Ответ появится здесь.</div>
             </div>
 
             <div class="response-section">
-              <h2 class="response-title">Пошагово</h2>
-              <p class="hint">Инструкция: «решай пошагово»</p>
-              <div id="response-step-by-step" class="response-box">Ответ появится здесь.</div>
+              <h2 class="response-title">temperature = 0.7</h2>
+              <p class="hint">Баланс точности и вариативности (дефолт многих моделей)</p>
+              <div id="response-temp-07" class="response-box response-box--temp-07">Ответ появится здесь.</div>
             </div>
 
             <div class="response-section">
-              <h2 class="response-title">Мета-промпт</h2>
-              <p class="hint">Сначала модель составляет промпт, затем решает по нему</p>
-              <div id="response-meta-prompt" class="response-box response-box--meta">
-                <div class="meta-block">
-                  <h3 class="meta-label">Сгенерированный промпт</h3>
-                  <div id="response-meta-prompt-text" class="meta-content">Промпт появится здесь.</div>
-                </div>
-                <div class="meta-block">
-                  <h3 class="meta-label">Ответ по промпту</h3>
-                  <div id="response-meta-prompt-answer" class="meta-content">Ответ появится здесь.</div>
-                </div>
-              </div>
+              <h2 class="response-title">temperature = 1.2</h2>
+              <p class="hint">Повышенная случайность — больше креативности и разнообразия</p>
+              <div id="response-temp-12" class="response-box response-box--temp-12">Ответ появится здесь.</div>
             </div>
 
-            <div class="response-section">
-              <h2 class="response-title">Панель экспертов</h2>
-              <p class="hint">Аналитик, инженер, критик</p>
-              <div id="response-experts" class="response-box">Ответ появится здесь.</div>
-            </div>
           </div>
 
           <div class="response-section response-section--comparison">
-            <h2 class="response-title">Сравнение</h2>
-            <p class="hint">Автоматический анализ: отличаются ли ответы, какой метод точнее</p>
+            <h2 class="response-title">Сравнение и выводы</h2>
+            <p class="hint">Автоматический анализ: точность, креативность, разнообразие и рекомендации по использованию</p>
             <div id="response-comparison" class="response-box response-box--comparison">Сравнение появится здесь.</div>
+          </div>
+
+          <div class="response-section response-section--conclusions">
+            <h2 class="response-title">Когда использовать каждую настройку</h2>
+            <div class="conclusions-grid">
+              <div class="conclusion-card conclusion-card--low">
+                <h3>temperature = 0</h3>
+                <p>Извлечение данных, расчёты, код, юридические и медицинские формулировки, классификация, ответы с одним правильным решением.</p>
+              </div>
+              <div class="conclusion-card conclusion-card--mid">
+                <h3>temperature = 0.7</h3>
+                <p>Универсальный режим: объяснения, статьи, диалоги, суммаризация, помощь в обучении — точность без излишней сухости.</p>
+              </div>
+              <div class="conclusion-card conclusion-card--high">
+                <h3>temperature = 1.2</h3>
+                <p>Брейнсторм, слоганы, сценарии, поэзия, игровые NPC, генерация множества вариантов — когда важнее новизна, чем стабильность.</p>
+              </div>
+            </div>
           </div>
         </div>
 
