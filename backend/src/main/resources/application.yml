@@ -1,0 +1,15 @@
+spring:
+  profiles:
+    active: local
+  application:
+    name: llm-chat-app
+  ai:
+    openai:
+      api-key: ${OPENROUTER_API_KEY}
+      base-url: https://openrouter.ai/api
+      chat:
+        options:
+          model: openai/gpt-4o-mini
+
+server:
+  port: 8080
