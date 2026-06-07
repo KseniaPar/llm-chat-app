@@ -11,6 +11,14 @@ spring:
         options:
           model: openai/gpt-4o-mini
 
+app:
+  compare-models:
+    weak: openai/gpt-oss-20b:free
+    medium: openai/gpt-4o-mini
+    strong: openai/gpt-oss-120b:free
+    max-tokens: 180
+    temperature: 0.7
+
 server:
   port: 8080
 

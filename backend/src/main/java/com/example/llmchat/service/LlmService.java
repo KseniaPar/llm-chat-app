@@ -2,6 +2,11 @@ package com.example.llmchat.service;
 
 import com.example.llmchat.dto.CompareResult;
 import com.example.llmchat.dto.LlmResult;
+import com.example.llmchat.dto.ModelAnalysisRequest;
+import com.example.llmchat.dto.ModelCallResponse;
+import com.example.llmchat.dto.ModelCompareResult;
+import com.example.llmchat.dto.ModelMetrics;
+import com.example.llmchat.dto.ModelTierResult;
 import com.example.llmchat.dto.ReasoningCompareResult;
 import com.example.llmchat.dto.TemperatureAnalysisRequest;
 import com.example.llmchat.dto.TemperatureCompareResult;
@@ -10,10 +15,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -22,6 +30,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class LlmService {
@@ -85,20 +95,48 @@ public class LlmService {
     private static final double TEMP_07 = 0.7;
     private static final double TEMP_12 = 1.2;
 
+    private static final String MODEL_SYSTEM_PROMPT = """
+            Отвечай кратко: не более 5–7 предложений или 3–4 пункта списка.
+            Без вступлений, заключений и повторов. Сразу по сути.
+            """;
+    private static final String MODEL_COMPARISON_PROMPT = """
+            Сравни 3 ответа на один запрос от моделей разного размера (слабая/средняя/сильная).
+            Оцени: качество, точность, полноту, скорость (по метрикам), ресурсоёмкость (токены).
+            В конце — короткий вывод (3–5 предложений): когда какую модель выбирать.
+            Не более 10–12 предложений всего.
+            """;
+    private static final int MODEL_COMPARISON_MAX_TOKENS = 250;
+    private static final Pattern RETRY_AFTER_SECONDS = Pattern.compile("retry_after_seconds(?:_raw)?\":([0-9.]+)");
+
     private final ChatModel chatModel;
     private final CompareRequestLogger compareLogger;
     private final String baseUrl;
     private final String model;
+    private final String weakModel;
+    private final String mediumModel;
+    private final String strongModel;
+    private final int modelMaxTokens;
+    private final double modelTemperature;
 
     public LlmService(
             ChatModel chatModel,
             CompareRequestLogger compareLogger,
             @Value("${spring.ai.openai.base-url}") String baseUrl,
-            @Value("${spring.ai.openai.chat.options.model}") String model) {
+            @Value("${spring.ai.openai.chat.options.model}") String model,
+            @Value("${app.compare-models.weak}") String weakModel,
+            @Value("${app.compare-models.medium}") String mediumModel,
+            @Value("${app.compare-models.strong}") String strongModel,
+            @Value("${app.compare-models.max-tokens}") int modelMaxTokens,
+            @Value("${app.compare-models.temperature}") double modelTemperature) {
         this.chatModel = chatModel;
         this.compareLogger = compareLogger;
         this.baseUrl = baseUrl;
         this.model = model;
+        this.weakModel = weakModel;
+        this.mediumModel = mediumModel;
+        this.strongModel = strongModel;
+        this.modelMaxTokens = modelMaxTokens;
+        this.modelTemperature = modelTemperature;
     }
 
     public LlmResult ask(String prompt) {
@@ -251,6 +289,252 @@ public class LlmService {
         return new TemperatureCompareResult(temp0, temp07, temp12, comparison, logs.toString());
     }
 
+    public ModelCallResponse askWithModel(String prompt, String tier) {
+        String modelId = resolveModelId(tier);
+        List<String> logs = new ArrayList<>();
+        addLog(logs, "Запрос в OpenRouter (tier = " + tier + ", model = " + modelId + ")");
+
+        List<Message> messages = modelMessages(prompt);
+        OpenAiChatOptions options = buildModelOptions(modelId);
+        LlmCallResult result = callLlmWithMetrics(messages, options, modelId);
+
+        addLog(logs, "Время ответа: " + result.metrics().responseTimeMs() + " ms");
+        addLog(logs, "Токены: prompt=" + result.metrics().promptTokens()
+                + ", completion=" + result.metrics().completionTokens()
+                + ", total=" + result.metrics().totalTokens());
+        addLog(logs, "Стоимость: $" + String.format("%.6f", result.metrics().costUsd()));
+        addLog(logs, "Ответ: \"" + result.text() + "\"");
+
+        return new ModelCallResponse(result.text(), result.metrics(), logs);
+    }
+
+    public LlmResult analyzeModels(ModelAnalysisRequest request) {
+        String llmUrl = baseUrl + "/v1/chat/completions";
+        StringBuilder logs = new StringBuilder();
+
+        String comparisonInput = buildModelComparisonInput(request);
+        List<Message> comparisonMessages = List.of(
+                new SystemMessage(MODEL_COMPARISON_PROMPT),
+                new UserMessage(comparisonInput));
+        OpenAiChatOptions comparisonOptions = OpenAiChatOptions.builder()
+                .model(mediumModel)
+                .maxTokens(MODEL_COMPARISON_MAX_TOKENS)
+                .temperature(modelTemperature)
+                .build();
+
+        LlmCallResult result = callLlmWithMetrics(comparisonMessages, comparisonOptions, mediumModel);
+        logs.append(compareLogger.logModelRequest(
+                "Request: AUTO COMPARISON",
+                llmUrl,
+                mediumModel,
+                comparisonMessages,
+                comparisonOptions,
+                result.text(),
+                result.metrics()));
+
+        return new LlmResult(result.text(), List.of(logs.toString()));
+    }
+
+    public ModelCompareResult compareModels(String prompt) {
+        String llmUrl = baseUrl + "/v1/chat/completions";
+        StringBuilder logs = new StringBuilder();
+        logs.append(compareLogger.logModelCompareStart(prompt));
+
+        List<Message> messages = modelMessages(prompt);
+
+        ModelRequestResult weakResult = runModelRequest(llmUrl, messages, weakModel, "Request 1: WEAK MODEL");
+        ModelRequestResult mediumResult = runModelRequest(llmUrl, messages, mediumModel, "Request 2: MEDIUM MODEL");
+        ModelRequestResult strongResult = runModelRequest(llmUrl, messages, strongModel, "Request 3: STRONG MODEL");
+
+        logs.append(weakResult.logs());
+        logs.append(mediumResult.logs());
+        logs.append(strongResult.logs());
+
+        ModelTierResult weak = new ModelTierResult(weakResult.answer(), weakResult.metrics());
+        ModelTierResult medium = new ModelTierResult(mediumResult.answer(), mediumResult.metrics());
+        ModelTierResult strong = new ModelTierResult(strongResult.answer(), strongResult.metrics());
+
+        LlmResult comparisonResult = analyzeModels(new ModelAnalysisRequest(
+                prompt,
+                weak.response(),
+                medium.response(),
+                strong.response(),
+                weak.metrics(),
+                medium.metrics(),
+                strong.metrics()));
+        String comparison = comparisonResult.response();
+        logs.append(comparisonResult.logs().get(0));
+
+        logs.append(compareLogger.logModelSummary(
+                weak.metrics(),
+                medium.metrics(),
+                strong.metrics(),
+                comparison.length()));
+
+        return new ModelCompareResult(weak, medium, strong, comparison, logs.toString());
+    }
+
+    private ModelRequestResult runModelRequest(
+            String llmUrl,
+            List<Message> messages,
+            String modelId,
+            String label) {
+        StringBuilder logs = new StringBuilder();
+        OpenAiChatOptions options = buildModelOptions(modelId);
+        LlmCallResult result = callLlmWithMetrics(messages, options, modelId);
+        logs.append(compareLogger.logModelRequest(
+                label, llmUrl, modelId, messages, options, result.text(), result.metrics()));
+        return new ModelRequestResult(result.text(), result.metrics(), logs.toString());
+    }
+
+    private String buildModelComparisonInput(ModelAnalysisRequest request) {
+        return """
+                Запрос: %s
+
+                --- Слабая модель (%s) ---
+                %s
+                %s
+
+                --- Средняя модель (%s) ---
+                %s
+                %s
+
+                --- Сильная модель (%s) ---
+                %s
+                %s
+                """.formatted(
+                request.prompt(),
+                metricsModelId(request.weakMetrics(), "слабая"),
+                formatMetricsLine(request.weakMetrics()),
+                request.weak(),
+                metricsModelId(request.mediumMetrics(), "средняя"),
+                formatMetricsLine(request.mediumMetrics()),
+                request.medium(),
+                metricsModelId(request.strongMetrics(), "сильная"),
+                formatMetricsLine(request.strongMetrics()),
+                request.strong());
+    }
+
+    private String metricsModelId(ModelMetrics metrics, String fallback) {
+        return metrics != null && metrics.modelId() != null ? metrics.modelId() : fallback;
+    }
+
+    private String formatMetricsLine(ModelMetrics metrics) {
+        if (metrics == null) {
+            return "Метрики не предоставлены";
+        }
+        return "Время: %d ms | Токены: %d (prompt=%d, completion=%d) | Стоимость: $%.6f".formatted(
+                metrics.responseTimeMs(),
+                metrics.totalTokens(),
+                metrics.promptTokens(),
+                metrics.completionTokens(),
+                metrics.costUsd());
+    }
+
+    private List<Message> modelMessages(String prompt) {
+        return List.of(
+                new SystemMessage(MODEL_SYSTEM_PROMPT),
+                new UserMessage(prompt));
+    }
+
+    private OpenAiChatOptions buildModelOptions(String modelId) {
+        return OpenAiChatOptions.builder()
+                .model(modelId)
+                .temperature(modelTemperature)
+                .maxTokens(modelMaxTokens)
+                .build();
+    }
+
+    private String resolveModelId(String tier) {
+        return switch (tier.toLowerCase()) {
+            case "weak" -> weakModel;
+            case "medium" -> mediumModel;
+            case "strong" -> strongModel;
+            default -> throw new IllegalArgumentException("Unknown tier: " + tier + ". Use weak, medium, or strong.");
+        };
+    }
+
+    private double calculateCost(String modelId, int promptTokens, int completionTokens) {
+        if (modelId != null && modelId.endsWith(":free")) {
+            return 0.0;
+        }
+        if (modelId != null && modelId.contains("gpt-4o-mini")) {
+            return (promptTokens * 0.15 / 1_000_000.0) + (completionTokens * 0.60 / 1_000_000.0);
+        }
+        return 0.0;
+    }
+
+    private LlmCallResult callLlmWithMetrics(
+            List<Message> messages,
+            OpenAiChatOptions options,
+            String modelId) {
+        NonTransientAiException lastError = null;
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            try {
+                return callLlmOnce(messages, options, modelId);
+            } catch (NonTransientAiException exception) {
+                lastError = exception;
+                if (attempt < 5 && isRateLimited(exception)) {
+                    sleepBeforeRetry(exception, attempt);
+                    continue;
+                }
+                throw exception;
+            }
+        }
+        throw lastError;
+    }
+
+    private LlmCallResult callLlmOnce(
+            List<Message> messages,
+            OpenAiChatOptions options,
+            String modelId) {
+        long start = System.nanoTime();
+        Prompt prompt = options != null ? new Prompt(messages, options) : new Prompt(messages);
+        ChatResponse chatResponse = chatModel.call(prompt);
+        long responseTimeMs = (System.nanoTime() - start) / 1_000_000;
+
+        String text = chatResponse.getResult().getOutput().getText();
+        int promptTokens = 0;
+        int completionTokens = 0;
+        int totalTokens = 0;
+
+        Usage usage = chatResponse.getMetadata() != null ? chatResponse.getMetadata().getUsage() : null;
+        if (usage != null) {
+            promptTokens = usage.getPromptTokens() != null ? usage.getPromptTokens() : 0;
+            completionTokens = usage.getCompletionTokens() != null ? usage.getCompletionTokens() : 0;
+            totalTokens = usage.getTotalTokens() != null ? usage.getTotalTokens() : promptTokens + completionTokens;
+        }
+
+        double costUsd = calculateCost(modelId, promptTokens, completionTokens);
+        ModelMetrics metrics = new ModelMetrics(
+                responseTimeMs, promptTokens, completionTokens, totalTokens, costUsd, modelId);
+        return new LlmCallResult(text, metrics);
+    }
+
+    private boolean isRateLimited(NonTransientAiException exception) {
+        String message = exception.getMessage();
+        return message != null && message.contains("429");
+    }
+
+    private void sleepBeforeRetry(NonTransientAiException exception, int attempt) {
+        long sleepMs = 3000L * attempt;
+        Matcher matcher = RETRY_AFTER_SECONDS.matcher(exception.getMessage() != null ? exception.getMessage() : "");
+        if (matcher.find()) {
+            sleepMs = (long) (Double.parseDouble(matcher.group(1)) * 1000L) + 500L;
+        }
+        try {
+            Thread.sleep(sleepMs);
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private record LlmCallResult(String text, ModelMetrics metrics) {
+    }
+
+    private record ModelRequestResult(String answer, ModelMetrics metrics, String logs) {
+    }
+
     private TemperatureRequestResult runTemperatureRequest(
             String llmUrl,
             List<Message> messages,
@@ -361,11 +645,18 @@ public class LlmService {
     }
 
     private String callLlm(List<Message> messages, ChatOptions options) {
-        Prompt prompt = options != null ? new Prompt(messages, options) : new Prompt(messages);
-        return chatModel.call(prompt)
-                .getResult()
-                .getOutput()
-                .getText();
+        String modelId = model;
+        if (options instanceof OpenAiChatOptions openAiOptions && openAiOptions.getModel() != null) {
+            modelId = openAiOptions.getModel();
+        }
+        return callLlmWithMetrics(messages, openAiOptionsFrom(options), modelId).text();
+    }
+
+    private OpenAiChatOptions openAiOptionsFrom(ChatOptions options) {
+        if (options instanceof OpenAiChatOptions openAiOptions) {
+            return openAiOptions;
+        }
+        return null;
     }
 
     private String callAndLog(

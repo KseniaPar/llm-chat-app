@@ -2,26 +2,41 @@ const promptInput = document.getElementById('prompt');
 const sendBtn = document.getElementById('send-btn');
 const loadingEl = document.getElementById('loading');
 const errorEl = document.getElementById('error');
-const temp0El = document.getElementById('response-temp-0');
-const temp07El = document.getElementById('response-temp-07');
-const temp12El = document.getElementById('response-temp-12');
 const comparisonEl = document.getElementById('response-comparison');
 const logsEl = document.getElementById('logs');
 
 const demoExamples = {
-  sleep: `Кратко: 3 факта о пользе сна и одна метафора для детей.`,
-  startup: `Придумай название экостартапа против пищевых отходов. Объясни в 2 предложениях.`,
-  quantum: `Кратко объясни квантовую запутанность и приведи одну бытовую аналогию.`,
-  water: `3 причины пить воду и короткий слоган для приложения-напоминалки.`,
+  reasoning: `У Маши было 8 конфет. Она съела 3 и купила ещё 5. Сколько конфет стало? Реши пошагово и объясни каждый шаг.`,
+  explain: `Объясни, как работает блокчейн, простыми словами для новичка. Не более 5 предложений.`,
+  code: `Напиши функцию на Python, которая проверяет, является ли строка палиндромом. Добавь краткий комментарий к коду.`,
+  analysis: `Сравни плюсы и минусы удалённой работы. Дай ровно 4 пункта: 2 за, 2 против.`,
 };
 
-const temperatureRequests = [
-  { el: temp0El, temperature: 0, key: 'temp0', label: 'temperature = 0' },
-  { el: temp07El, temperature: 0.7, key: 'temp07', label: 'temperature = 0.7' },
-  { el: temp12El, temperature: 1.2, key: 'temp12', label: 'temperature = 1.2' },
+const modelRequests = [
+  {
+    responseEl: document.getElementById('response-model-weak'),
+    metricsEl: document.getElementById('metrics-model-weak'),
+    tier: 'weak',
+    key: 'weak',
+    label: 'Слабая (20B)',
+  },
+  {
+    responseEl: document.getElementById('response-model-medium'),
+    metricsEl: document.getElementById('metrics-model-medium'),
+    tier: 'medium',
+    key: 'medium',
+    label: 'Средняя (GPT-4o mini)',
+  },
+  {
+    responseEl: document.getElementById('response-model-strong'),
+    metricsEl: document.getElementById('metrics-model-strong'),
+    tier: 'strong',
+    key: 'strong',
+    label: 'Сильная (120B)',
+  },
 ];
 
-const temperatureCount = temperatureRequests.length;
+const modelCount = modelRequests.length;
 
 let activeRequestId = 0;
 
@@ -48,47 +63,94 @@ function clearError() {
   errorEl.classList.add('hidden');
 }
 
-function clearResponses() {
-  temperatureRequests.forEach(({ el }) => {
+function formatCost(costUsd) {
+  if (costUsd === 0 || costUsd === 0.0) {
+    return '$0.00 (бесплатно)';
+  }
+  return `$${costUsd.toFixed(6)}`;
+}
+
+function renderMetrics(el, metrics) {
+  if (!metrics) {
+    el.classList.add('hidden');
     el.textContent = '';
-    setPanelLoading(el, false);
+    return;
+  }
+
+  el.classList.remove('hidden');
+  el.innerHTML = `
+    <dl class="metrics-list">
+      <div><dt>Время</dt><dd>${metrics.responseTimeMs} ms</dd></div>
+      <div><dt>Prompt tokens</dt><dd>${metrics.promptTokens}</dd></div>
+      <div><dt>Completion tokens</dt><dd>${metrics.completionTokens}</dd></div>
+      <div><dt>Total tokens</dt><dd>${metrics.totalTokens}</dd></div>
+      <div><dt>Стоимость</dt><dd>${formatCost(metrics.costUsd)}</dd></div>
+      <div class="metrics-model-id"><dt>Модель</dt><dd>${metrics.modelId}</dd></div>
+    </dl>
+  `;
+}
+
+function clearResponses() {
+  modelRequests.forEach(({ responseEl, metricsEl }) => {
+    responseEl.textContent = '';
+    setPanelLoading(responseEl, false);
+    renderMetrics(metricsEl, null);
   });
   comparisonEl.textContent = '';
   comparisonEl.classList.remove('response-box--loading');
   logsEl.textContent = '';
 }
 
-async function fetchTemperature(prompt, temperature) {
-  const response = await fetch('/api/chat/temperature', {
+async function parseErrorResponse(response) {
+  const text = await response.text();
+  try {
+    const json = JSON.parse(text);
+    return json.error || json.message || text;
+  } catch {
+    return text || `Сервер вернул ошибку: ${response.status}`;
+  }
+}
+
+async function fetchModel(prompt, tier) {
+  const response = await fetch('/api/chat/model', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, temperature }),
+    body: JSON.stringify({ prompt, tier }),
   });
 
   if (!response.ok) {
-    throw new Error(`Сервер вернул ошибку: ${response.status}`);
+    throw new Error(await parseErrorResponse(response));
   }
 
   return response.json();
 }
 
-async function fetchComparison(prompt, answers) {
-  const response = await fetch('/api/chat/compare-temperature-analysis', {
+async function fetchComparison(prompt, answers, metrics) {
+  const response = await fetch('/api/chat/compare-models-analysis', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       prompt,
-      temp0: answers.temp0,
-      temp07: answers.temp07,
-      temp12: answers.temp12,
+      weak: answers.weak,
+      medium: answers.medium,
+      strong: answers.strong,
+      weakMetrics: metrics.weak,
+      mediumMetrics: metrics.medium,
+      strongMetrics: metrics.strong,
     }),
   });
 
   if (!response.ok) {
-    throw new Error(`Сервер вернул ошибку: ${response.status}`);
+    throw new Error(await parseErrorResponse(response));
   }
 
   return response.json();
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 async function sendPrompt() {
@@ -101,64 +163,75 @@ async function sendPrompt() {
   const requestId = ++activeRequestId;
   clearError();
   clearResponses();
-  setLoading(true, 'Запросы отправлены параллельно...');
+  setLoading(true, 'Запросы отправляются по очереди...');
 
-  const answers = { temp0: '', temp07: '', temp12: '' };
+  const answers = { weak: '', medium: '', strong: '' };
+  const metricsByTier = { weak: null, medium: null, strong: null };
   const logChunks = [];
   let completedCount = 0;
   let hasError = false;
 
-  temperatureRequests.forEach(({ el }) => {
-    el.textContent = 'Ожидание ответа...';
-    setPanelLoading(el, true);
-  });
-  comparisonEl.textContent = `Появится после получения всех ${temperatureCount} ответов...`;
+  comparisonEl.textContent = `Появится после получения всех ${modelCount} ответов...`;
   comparisonEl.classList.add('response-box--loading');
 
-  const temperaturePromises = temperatureRequests.map(async ({ el, temperature, key, label }) => {
+  for (const { responseEl, metricsEl, tier, key, label } of modelRequests) {
+    if (requestId !== activeRequestId) {
+      return;
+    }
+
+    responseEl.textContent = 'Ожидание ответа...';
+    setPanelLoading(responseEl, true);
+    setLoading(true, `Запрос к модели: ${label}...`);
+
     try {
-      const data = await fetchTemperature(prompt, temperature);
+      const data = await fetchModel(prompt, tier);
       if (requestId !== activeRequestId) {
         return;
       }
 
       const answer = data.response || 'Пустой ответ от LLM.';
       answers[key] = answer;
-      el.textContent = answer;
-      setPanelLoading(el, false);
+      metricsByTier[key] = data.metrics || null;
+      responseEl.textContent = answer;
+      renderMetrics(metricsEl, data.metrics);
+      setPanelLoading(responseEl, false);
 
       if (Array.isArray(data.logs)) {
         logChunks.push(`=== ${label} ===\n${data.logs.join('\n')}`);
       }
 
       completedCount += 1;
-      setLoading(true, `Получено ${completedCount} из ${temperatureCount} ответов...`);
+      setLoading(true, `Получено ${completedCount} из ${modelCount} ответов...`);
     } catch (error) {
       if (requestId !== activeRequestId) {
         return;
       }
       hasError = true;
-      el.textContent = 'Ошибка получения ответа.';
-      setPanelLoading(el, false);
+      responseEl.textContent = 'Ошибка получения ответа.';
+      setPanelLoading(responseEl, false);
       showError(
         error.message.includes('Failed to fetch')
           ? 'Не удалось связаться с backend. Убедитесь, что Spring Boot запущен на порту 8080.'
           : error.message
       );
+      break;
     }
-  });
 
-  await Promise.all(temperaturePromises);
+    if (completedCount < modelCount) {
+      await sleep(3000);
+    }
+  }
 
   if (requestId !== activeRequestId) {
     return;
   }
 
-  const allAnswersReady = temperatureRequests.every(({ key }) => answers[key]);
-  if (!hasError && allAnswersReady) {
+  const allAnswersReady = modelRequests.every(({ key }) => answers[key]);
+  const allMetricsReady = modelRequests.every(({ key }) => metricsByTier[key]);
+  if (!hasError && allAnswersReady && allMetricsReady) {
     setLoading(true, 'Формирую сравнение...');
     try {
-      const comparisonData = await fetchComparison(prompt, answers);
+      const comparisonData = await fetchComparison(prompt, answers, metricsByTier);
       if (requestId !== activeRequestId) {
         return;
       }

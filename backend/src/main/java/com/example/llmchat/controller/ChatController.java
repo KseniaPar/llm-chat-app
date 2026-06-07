@@ -5,6 +5,11 @@ import com.example.llmchat.dto.ChatResponse;
 import com.example.llmchat.dto.CompareResponse;
 import com.example.llmchat.dto.CompareResult;
 import com.example.llmchat.dto.LlmResult;
+import com.example.llmchat.dto.ModelAnalysisRequest;
+import com.example.llmchat.dto.ModelCallResponse;
+import com.example.llmchat.dto.ModelCompareResponse;
+import com.example.llmchat.dto.ModelCompareResult;
+import com.example.llmchat.dto.ModelRequest;
 import com.example.llmchat.dto.ReasoningCompareResponse;
 import com.example.llmchat.dto.ReasoningCompareResult;
 import com.example.llmchat.dto.TemperatureAnalysisRequest;
@@ -101,6 +106,38 @@ public class ChatController {
                 result.metaPrompt(),
                 result.metaPromptAnswer(),
                 result.experts(),
+                result.comparison(),
+                result.logs());
+    }
+
+    @PostMapping("/model")
+    public ModelCallResponse model(@RequestBody ModelRequest request) {
+        log.info("POST /api/chat/model — prompt length: {}, tier: {}",
+                request.prompt().length(), request.tier());
+
+        return llmService.askWithModel(request.prompt(), request.tier());
+    }
+
+    @PostMapping("/compare-models-analysis")
+    public ChatResponse compareModelsAnalysis(@RequestBody ModelAnalysisRequest request) {
+        log.info("POST /api/chat/compare-models-analysis — prompt length: {}",
+                request.prompt().length());
+
+        LlmResult result = llmService.analyzeModels(request);
+
+        return new ChatResponse(result.response(), result.logs());
+    }
+
+    @PostMapping("/compare-models")
+    public ModelCompareResponse compareModels(@RequestBody ChatRequest request) {
+        log.info("POST /api/chat/compare-models — prompt length: {}", request.prompt().length());
+
+        ModelCompareResult result = llmService.compareModels(request.prompt());
+
+        return new ModelCompareResponse(
+                result.weak(),
+                result.medium(),
+                result.strong(),
                 result.comparison(),
                 result.logs());
     }

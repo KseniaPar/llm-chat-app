@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import com.example.llmchat.dto.ModelMetrics;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -25,6 +26,52 @@ public class CompareRequestLogger {
     public CompareRequestLogger(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper.copy()
                 .enable(SerializationFeature.INDENT_OUTPUT);
+    }
+
+    public String logModelCompareStart(String prompt) {
+        StringBuilder block = new StringBuilder();
+        appendLine(block, LINE);
+        appendLine(block, "COMPARE - Day 5 (3 model tiers)");
+        appendLine(block, "User prompt: \"" + prompt + "\"");
+        appendLine(block, LINE);
+        return block.toString();
+    }
+
+    public String logModelRequest(
+            String label,
+            String url,
+            String model,
+            List<Message> messages,
+            OpenAiChatOptions options,
+            String answer,
+            ModelMetrics metrics) {
+        StringBuilder block = new StringBuilder();
+        appendLine(block, "");
+        appendLine(block, "=== " + label + " ===");
+        appendLine(block, "POST " + url);
+        appendLine(block, "");
+        appendLine(block, "Request:");
+        appendLine(block, toPrettyJson(buildRequestBody(model, messages, options)));
+        appendLine(block, "");
+        appendLine(block, "Response:");
+        appendLine(block, toPrettyJson(buildResponseBodyWithMetrics(answer, metrics)));
+        return block.toString();
+    }
+
+    public String logModelSummary(ModelMetrics weak, ModelMetrics medium, ModelMetrics strong, int comparisonLen) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("weak", toMetricsMap(weak));
+        summary.put("medium", toMetricsMap(medium));
+        summary.put("strong", toMetricsMap(strong));
+        summary.put("comparisonChars", comparisonLen);
+
+        StringBuilder block = new StringBuilder();
+        appendLine(block, "");
+        appendLine(block, "=== SUMMARY (Day 5 model comparison) ===");
+        appendLine(block, toPrettyJson(summary));
+        appendLine(block, LINE);
+        appendLine(block, "");
+        return block.toString();
     }
 
     public String logTemperatureCompareStart(String prompt) {
@@ -171,6 +218,23 @@ public class CompareRequestLogger {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("choices", List.of(choice));
         return body;
+    }
+
+    private Map<String, Object> buildResponseBodyWithMetrics(String answer, ModelMetrics metrics) {
+        Map<String, Object> body = buildResponseBody(answer);
+        body.put("usage", toMetricsMap(metrics));
+        return body;
+    }
+
+    private Map<String, Object> toMetricsMap(ModelMetrics metrics) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("model", metrics.modelId());
+        map.put("responseTimeMs", metrics.responseTimeMs());
+        map.put("prompt_tokens", metrics.promptTokens());
+        map.put("completion_tokens", metrics.completionTokens());
+        map.put("total_tokens", metrics.totalTokens());
+        map.put("costUsd", metrics.costUsd());
+        return map;
     }
 
     private List<Map<String, String>> toMessageMaps(List<Message> messages) {
