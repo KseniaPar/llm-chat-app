@@ -3,6 +3,8 @@ package com.example.llmchat.service;
 import com.example.llmchat.dto.CompareResult;
 import com.example.llmchat.dto.LlmResult;
 import com.example.llmchat.dto.ReasoningCompareResult;
+import com.example.llmchat.dto.TemperatureAnalysisRequest;
+import com.example.llmchat.dto.TemperatureCompareResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
@@ -19,6 +21,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 public class LlmService {
@@ -66,6 +69,21 @@ public class LlmService {
             2) Какой метод дал наиболее точный результат и почему?
             3) Краткий вывод: какой способ рассуждения эффективнее для логических задач.
             """;
+    private static final String TEMPERATURE_SYSTEM_PROMPT = """
+            Отвечай кратко: не более 5–7 предложений или 3–4 пункта списка.
+            Без вступлений, заключений и повторов. Сразу по сути.
+            """;
+    private static final String TEMPERATURE_COMPARISON_PROMPT = """
+            Сравни 3 ответа на один запрос (temperature 0, 0.7, 1.2).
+            Кратко оцени: точность, креативность, разнообразие.
+            В конце — по одному предложению: когда использовать каждую temperature.
+            Не более 8–10 предложений всего.
+            """;
+    private static final int TEMPERATURE_MAX_TOKENS = 180;
+    private static final int TEMPERATURE_COMPARISON_MAX_TOKENS = 220;
+    private static final double TEMP_0 = 0.0;
+    private static final double TEMP_07 = 0.7;
+    private static final double TEMP_12 = 1.2;
 
     private final ChatModel chatModel;
     private final CompareRequestLogger compareLogger;
@@ -145,6 +163,119 @@ public class LlmService {
                 fullControl.length()));
 
         return new CompareResult(unrestricted, formatOnly, lengthOnly, stopOnly, fullControl, logs.toString());
+    }
+
+    public LlmResult askWithTemperature(String prompt, double temperature) {
+        List<String> logs = new ArrayList<>();
+        String answer = callAndLog(
+                logs,
+                "Запрос в OpenRouter (temperature = " + temperature + ")",
+                temperatureMessages(prompt),
+                buildTemperatureOptions(temperature));
+        return new LlmResult(answer, logs);
+    }
+
+    public LlmResult analyzeTemperature(TemperatureAnalysisRequest request) {
+        String llmUrl = baseUrl + "/v1/chat/completions";
+        StringBuilder logs = new StringBuilder();
+
+        String comparisonInput = """
+                Запрос: %s
+
+                --- temperature = 0 ---
+                %s
+
+                --- temperature = 0.7 ---
+                %s
+
+                --- temperature = 1.2 ---
+                %s
+                """.formatted(
+                request.prompt(),
+                request.temp0(),
+                request.temp07(),
+                request.temp12());
+
+        List<Message> comparisonMessages = List.of(
+                new SystemMessage(TEMPERATURE_COMPARISON_PROMPT),
+                new UserMessage(comparisonInput));
+        OpenAiChatOptions comparisonOptions = OpenAiChatOptions.builder()
+                .maxTokens(TEMPERATURE_COMPARISON_MAX_TOKENS)
+                .build();
+        String comparison = runCompareRequest(
+                logs, "Request: AUTO COMPARISON", llmUrl, comparisonMessages, comparisonOptions);
+
+        return new LlmResult(comparison, List.of(logs.toString()));
+    }
+
+    public TemperatureCompareResult compareTemperature(String prompt) {
+        String llmUrl = baseUrl + "/v1/chat/completions";
+        StringBuilder logs = new StringBuilder();
+        logs.append(compareLogger.logTemperatureCompareStart(prompt));
+
+        List<Message> messages = temperatureMessages(prompt);
+
+        CompletableFuture<TemperatureRequestResult> temp0Future = CompletableFuture.supplyAsync(
+                () -> runTemperatureRequest(
+                        llmUrl, messages, TEMP_0, "Request 1: TEMPERATURE = 0"));
+        CompletableFuture<TemperatureRequestResult> temp07Future = CompletableFuture.supplyAsync(
+                () -> runTemperatureRequest(
+                        llmUrl, messages, TEMP_07, "Request 2: TEMPERATURE = 0.7"));
+        CompletableFuture<TemperatureRequestResult> temp12Future = CompletableFuture.supplyAsync(
+                () -> runTemperatureRequest(
+                        llmUrl, messages, TEMP_12, "Request 3: TEMPERATURE = 1.2"));
+
+        TemperatureRequestResult temp0Result = temp0Future.join();
+        TemperatureRequestResult temp07Result = temp07Future.join();
+        TemperatureRequestResult temp12Result = temp12Future.join();
+
+        logs.append(temp0Result.logs());
+        logs.append(temp07Result.logs());
+        logs.append(temp12Result.logs());
+
+        String temp0 = temp0Result.answer();
+        String temp07 = temp07Result.answer();
+        String temp12 = temp12Result.answer();
+
+        LlmResult comparisonResult = analyzeTemperature(
+                new TemperatureAnalysisRequest(prompt, temp0, temp07, temp12));
+        String comparison = comparisonResult.response();
+        logs.append(comparisonResult.logs().get(0));
+
+        logs.append(compareLogger.logTemperatureSummary(
+                temp0.length(),
+                temp07.length(),
+                temp12.length(),
+                comparison.length()));
+
+        return new TemperatureCompareResult(temp0, temp07, temp12, comparison, logs.toString());
+    }
+
+    private TemperatureRequestResult runTemperatureRequest(
+            String llmUrl,
+            List<Message> messages,
+            double temperature,
+            String label) {
+        StringBuilder logs = new StringBuilder();
+        String answer = runCompareRequest(
+                logs, label, llmUrl, messages, buildTemperatureOptions(temperature));
+        return new TemperatureRequestResult(answer, logs.toString());
+    }
+
+    private List<Message> temperatureMessages(String prompt) {
+        return List.of(
+                new SystemMessage(TEMPERATURE_SYSTEM_PROMPT),
+                new UserMessage(prompt));
+    }
+
+    private OpenAiChatOptions buildTemperatureOptions(double temperature) {
+        return OpenAiChatOptions.builder()
+                .temperature(temperature)
+                .maxTokens(TEMPERATURE_MAX_TOKENS)
+                .build();
+    }
+
+    private record TemperatureRequestResult(String answer, String logs) {
     }
 
     public ReasoningCompareResult compareReasoning(String task) {
@@ -248,6 +379,7 @@ public class LlmService {
         addLog(logs, "Сообщения: " + formatMessages(messages));
 
         if (options instanceof OpenAiChatOptions openAiOptions) {
+            addLog(logs, "temperature: " + openAiOptions.getTemperature());
             addLog(logs, "max_tokens: " + openAiOptions.getMaxTokens());
             addLog(logs, "stop: " + openAiOptions.getStopSequences());
         } else if (options == null) {

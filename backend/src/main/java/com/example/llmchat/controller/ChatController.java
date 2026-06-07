@@ -7,6 +7,10 @@ import com.example.llmchat.dto.CompareResult;
 import com.example.llmchat.dto.LlmResult;
 import com.example.llmchat.dto.ReasoningCompareResponse;
 import com.example.llmchat.dto.ReasoningCompareResult;
+import com.example.llmchat.dto.TemperatureAnalysisRequest;
+import com.example.llmchat.dto.TemperatureCompareResponse;
+import com.example.llmchat.dto.TemperatureCompareResult;
+import com.example.llmchat.dto.TemperatureRequest;
 import com.example.llmchat.service.LlmService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +52,40 @@ public class ChatController {
                 result.lengthOnly(),
                 result.stopOnly(),
                 result.fullControl(),
+                result.logs());
+    }
+
+    @PostMapping("/temperature")
+    public ChatResponse temperature(@RequestBody TemperatureRequest request) {
+        log.info("POST /api/chat/temperature — prompt length: {}, temperature: {}",
+                request.prompt().length(), request.temperature());
+
+        LlmResult result = llmService.askWithTemperature(request.prompt(), request.temperature());
+
+        return new ChatResponse(result.response(), result.logs());
+    }
+
+    @PostMapping("/compare-temperature-analysis")
+    public ChatResponse compareTemperatureAnalysis(@RequestBody TemperatureAnalysisRequest request) {
+        log.info("POST /api/chat/compare-temperature-analysis — prompt length: {}",
+                request.prompt().length());
+
+        LlmResult result = llmService.analyzeTemperature(request);
+
+        return new ChatResponse(result.response(), result.logs());
+    }
+
+    @PostMapping("/compare-temperature")
+    public TemperatureCompareResponse compareTemperature(@RequestBody ChatRequest request) {
+        log.info("POST /api/chat/compare-temperature — prompt length: {}", request.prompt().length());
+
+        TemperatureCompareResult result = llmService.compareTemperature(request.prompt());
+
+        return new TemperatureCompareResponse(
+                result.temp0(),
+                result.temp07(),
+                result.temp12(),
+                result.comparison(),
                 result.logs());
     }
 
