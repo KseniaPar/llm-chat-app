@@ -5,6 +5,8 @@ import com.example.llmchat.dto.ChatResponse;
 import com.example.llmchat.dto.CompareResponse;
 import com.example.llmchat.dto.CompareResult;
 import com.example.llmchat.dto.LlmResult;
+import com.example.llmchat.dto.ReasoningCompareResponse;
+import com.example.llmchat.dto.ReasoningCompareResult;
 import com.example.llmchat.service.LlmService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,6 +48,22 @@ public class ChatController {
                 result.lengthOnly(),
                 result.stopOnly(),
                 result.fullControl(),
+                result.logs());
+    }
+
+    @PostMapping("/compare-reasoning")
+    public ReasoningCompareResponse compareReasoning(@RequestBody ChatRequest request) {
+        log.info("POST /api/chat/compare-reasoning — prompt length: {}", request.prompt().length());
+
+        ReasoningCompareResult result = llmService.compareReasoning(request.prompt());
+
+        return new ReasoningCompareResponse(
+                result.direct(),
+                result.stepByStep(),
+                result.metaPrompt(),
+                result.metaPromptAnswer(),
+                result.experts(),
+                result.comparison(),
                 result.logs());
     }
 }
