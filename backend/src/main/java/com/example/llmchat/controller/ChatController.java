@@ -2,6 +2,8 @@ package com.example.llmchat.controller;
 
 import com.example.llmchat.dto.ChatRequest;
 import com.example.llmchat.dto.ChatResponse;
+import com.example.llmchat.dto.CompareResponse;
+import com.example.llmchat.dto.CompareResult;
 import com.example.llmchat.dto.LlmResult;
 import com.example.llmchat.service.LlmService;
 import org.slf4j.Logger;
@@ -30,5 +32,20 @@ public class ChatController {
         LlmResult result = llmService.ask(request.prompt());
 
         return new ChatResponse(result.response(), result.logs());
+    }
+
+    @PostMapping("/compare")
+    public CompareResponse compare(@RequestBody ChatRequest request) {
+        log.info("POST /api/chat/compare — prompt length: {}", request.prompt().length());
+
+        CompareResult result = llmService.compare(request.prompt());
+
+        return new CompareResponse(
+                result.unrestricted(),
+                result.formatOnly(),
+                result.lengthOnly(),
+                result.stopOnly(),
+                result.fullControl(),
+                result.logs());
     }
 }
