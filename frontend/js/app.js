@@ -2,8 +2,20 @@ const promptInput = document.getElementById('prompt');
 const sendBtn = document.getElementById('send-btn');
 const loadingEl = document.getElementById('loading');
 const errorEl = document.getElementById('error');
-const responseEl = document.getElementById('response');
+const unrestrictedEl = document.getElementById('response-unrestricted');
+const formatOnlyEl = document.getElementById('response-format-only');
+const lengthOnlyEl = document.getElementById('response-length-only');
+const stopOnlyEl = document.getElementById('response-stop-only');
+const fullControlEl = document.getElementById('response-full-control');
 const logsEl = document.getElementById('logs');
+
+const responseFields = [
+  { el: unrestrictedEl, key: 'unrestricted', fallback: 'Пустой ответ от LLM.' },
+  { el: formatOnlyEl, key: 'formatOnly', fallback: 'Пустой ответ от LLM.' },
+  { el: lengthOnlyEl, key: 'lengthOnly', fallback: 'Пустой ответ от LLM.' },
+  { el: stopOnlyEl, key: 'stopOnly', fallback: 'Пустой ответ от LLM.' },
+  { el: fullControlEl, key: 'fullControl', fallback: 'Пустой ответ от LLM.' },
+];
 
 function setLoading(isLoading) {
   sendBtn.disabled = isLoading;
@@ -20,6 +32,13 @@ function clearError() {
   errorEl.classList.add('hidden');
 }
 
+function clearResponses(message = '') {
+  responseFields.forEach(({ el }) => {
+    el.textContent = message;
+  });
+  logsEl.textContent = message;
+}
+
 async function sendPrompt() {
   const prompt = promptInput.value.trim();
   if (!prompt) {
@@ -29,11 +48,10 @@ async function sendPrompt() {
 
   clearError();
   setLoading(true);
-  responseEl.textContent = '';
-  logsEl.textContent = '';
+  clearResponses('');
 
   try {
-    const response = await fetch('/api/chat', {
+    const response = await fetch('/api/chat/compare', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt }),
@@ -44,17 +62,17 @@ async function sendPrompt() {
     }
 
     const data = await response.json();
-    responseEl.textContent = data.response || 'Пустой ответ от LLM.';
-    logsEl.textContent = Array.isArray(data.logs) && data.logs.length > 0
-      ? data.logs.join('\n')
-      : 'Логи не получены.';
+    responseFields.forEach(({ el, key, fallback }) => {
+      el.textContent = data[key] || fallback;
+    });
+    logsEl.textContent = data.logs || 'Логи не получены.';
   } catch (error) {
     showError(
       error.message.includes('Failed to fetch')
         ? 'Не удалось связаться с backend. Убедитесь, что Spring Boot запущен на порту 8080.'
         : error.message
     );
-    responseEl.textContent = 'Ответ не получен.';
+    clearResponses('Ответ не получен.');
     logsEl.textContent = 'Логи недоступны из-за ошибки.';
   } finally {
     setLoading(false);

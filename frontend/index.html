@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LLM Chat Demo</title>
+  <title>День 2 — Формат ответа</title>
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
   <main class="container">
     <header class="header">
-      <h1>LLM Chat Demo</h1>
-      <p class="subtitle">OpenRouter + Spring Boot</p>
+      <h1>День 2 — Формат ответа</h1>
+      <p class="subtitle">1 запрос без ограничений + 4 уровня контроля. Ответы и логи на одном экране.</p>
     </header>
 
     <section class="chat-card">
@@ -18,25 +18,56 @@
       <textarea
         id="prompt"
         class="prompt-input"
-        rows="4"
-        placeholder="Например: Расскажи короткий факт о Java..."
+        rows="3"
+        placeholder="Например: Расскажи интересные факты о Java..."
       ></textarea>
 
       <div class="actions">
-        <button id="send-btn" class="send-btn" type="button">Отправить</button>
+        <button id="send-btn" class="send-btn" type="button">Сравнить</button>
         <span id="loading" class="loading hidden" aria-live="polite">Думаю...</span>
       </div>
 
       <div id="error" class="error hidden" role="alert"></div>
 
-      <div class="logs-section">
-        <h2 class="response-title">Логи</h2>
-        <div id="logs" class="logs-box">Логи запроса появятся здесь.</div>
-      </div>
+      <div class="workspace">
+        <div class="responses-panel">
+          <div class="response-section response-section--full">
+            <h2 class="response-title">Без ограничений</h2>
+            <p class="hint">Свободный ответ — без формата, длины и stop</p>
+            <div id="response-unrestricted" class="response-box response-box--full">Свободный ответ появится здесь.</div>
+          </div>
 
-      <div class="response-section">
-        <h2 class="response-title">Ответ</h2>
-        <div id="response" class="response-box">Ответ появится здесь после отправки промпта.</div>
+          <div class="compare-grid">
+            <div class="response-section">
+              <h2 class="response-title">Только формат</h2>
+              <p class="hint">System prompt: Тезис/Факт</p>
+              <div id="response-format-only" class="response-box">Ответ появится здесь.</div>
+            </div>
+
+            <div class="response-section">
+              <h2 class="response-title">Только длина</h2>
+              <p class="hint">max_tokens: 80</p>
+              <div id="response-length-only" class="response-box">Ответ появится здесь.</div>
+            </div>
+
+            <div class="response-section">
+              <h2 class="response-title">Только stop</h2>
+              <p class="hint">stop: END + инструкция завершить END</p>
+              <div id="response-stop-only" class="response-box">Ответ появится здесь.</div>
+            </div>
+
+            <div class="response-section">
+              <h2 class="response-title">Полный контроль</h2>
+              <p class="hint">Формат + max_tokens: 80 + stop: END</p>
+              <div id="response-full-control" class="response-box">Ответ появится здесь.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="logs-panel">
+          <h2 class="response-title">Логи API</h2>
+          <pre id="logs" class="logs-box">Логи запросов появятся здесь.</pre>
+        </div>
       </div>
     </section>
   </main>
