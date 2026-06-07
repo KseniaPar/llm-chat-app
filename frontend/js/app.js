@@ -2,23 +2,45 @@ const promptInput = document.getElementById('prompt');
 const sendBtn = document.getElementById('send-btn');
 const loadingEl = document.getElementById('loading');
 const errorEl = document.getElementById('error');
-const unrestrictedEl = document.getElementById('response-unrestricted');
-const formatOnlyEl = document.getElementById('response-format-only');
-const lengthOnlyEl = document.getElementById('response-length-only');
-const stopOnlyEl = document.getElementById('response-stop-only');
-const fullControlEl = document.getElementById('response-full-control');
+const directEl = document.getElementById('response-direct');
+const stepByStepEl = document.getElementById('response-step-by-step');
+const metaPromptTextEl = document.getElementById('response-meta-prompt-text');
+const metaPromptAnswerEl = document.getElementById('response-meta-prompt-answer');
+const expertsEl = document.getElementById('response-experts');
+const comparisonEl = document.getElementById('response-comparison');
 const logsEl = document.getElementById('logs');
 
+const demoExamples = {
+  professions: `У Ани, Бори и Вити разные профессии: инженер, врач, учитель.
+Аня не врач. Боря не инженер. Витя — учитель.
+Кто кем работает?`,
+  knights: `На острове живут рыцари (всегда говорят правду) и лжецы (всегда лгут).
+А сказал: «Б — лжец».
+Б сказал: «А и В одного типа».
+В сказал: «А — рыцарь».
+Кто рыцарь, а кто лжец?`,
+  ages: `У трёх друзей — Аня, Боря и Витя — разный возраст: один старший, один средний, один младший.
+Аня старше Бори.
+Витя не самый младший.
+Боря не самый старший.
+Расставьте их по возрасту от старшего к младшему.`,
+  switches: `В комнате 3 лампы, снаружи 3 выключателя.
+Вы можете зайти в комнату только один раз.
+Как определить, какой выключатель к какой лампе относится?`,
+};
+
 const responseFields = [
-  { el: unrestrictedEl, key: 'unrestricted', fallback: 'Пустой ответ от LLM.' },
-  { el: formatOnlyEl, key: 'formatOnly', fallback: 'Пустой ответ от LLM.' },
-  { el: lengthOnlyEl, key: 'lengthOnly', fallback: 'Пустой ответ от LLM.' },
-  { el: stopOnlyEl, key: 'stopOnly', fallback: 'Пустой ответ от LLM.' },
-  { el: fullControlEl, key: 'fullControl', fallback: 'Пустой ответ от LLM.' },
+  { el: directEl, key: 'direct', fallback: 'Пустой ответ от LLM.' },
+  { el: stepByStepEl, key: 'stepByStep', fallback: 'Пустой ответ от LLM.' },
+  { el: expertsEl, key: 'experts', fallback: 'Пустой ответ от LLM.' },
+  { el: comparisonEl, key: 'comparison', fallback: 'Пустой ответ от LLM.' },
 ];
 
 function setLoading(isLoading) {
   sendBtn.disabled = isLoading;
+  document.querySelectorAll('.demo-btn').forEach((button) => {
+    button.disabled = isLoading;
+  });
   loadingEl.classList.toggle('hidden', !isLoading);
 }
 
@@ -36,13 +58,15 @@ function clearResponses(message = '') {
   responseFields.forEach(({ el }) => {
     el.textContent = message;
   });
+  metaPromptTextEl.textContent = message;
+  metaPromptAnswerEl.textContent = message;
   logsEl.textContent = message;
 }
 
 async function sendPrompt() {
   const prompt = promptInput.value.trim();
   if (!prompt) {
-    showError('Введите промпт перед отправкой.');
+    showError('Введите логическую задачу перед отправкой.');
     return;
   }
 
@@ -51,7 +75,7 @@ async function sendPrompt() {
   clearResponses('');
 
   try {
-    const response = await fetch('/api/chat/compare', {
+    const response = await fetch('/api/chat/compare-reasoning', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt }),
@@ -65,6 +89,8 @@ async function sendPrompt() {
     responseFields.forEach(({ el, key, fallback }) => {
       el.textContent = data[key] || fallback;
     });
+    metaPromptTextEl.textContent = data.metaPrompt || 'Пустой ответ от LLM.';
+    metaPromptAnswerEl.textContent = data.metaPromptAnswer || 'Пустой ответ от LLM.';
     logsEl.textContent = data.logs || 'Логи не получены.';
   } catch (error) {
     showError(
@@ -79,7 +105,23 @@ async function sendPrompt() {
   }
 }
 
+function selectDemo(demoId) {
+  const text = demoExamples[demoId];
+  if (!text) {
+    return;
+  }
+  promptInput.value = text;
+  clearError();
+  promptInput.focus();
+}
+
 sendBtn.addEventListener('click', sendPrompt);
+
+document.querySelectorAll('.demo-btn').forEach((button) => {
+  button.addEventListener('click', () => {
+    selectDemo(button.dataset.demo);
+  });
+});
 
 promptInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {

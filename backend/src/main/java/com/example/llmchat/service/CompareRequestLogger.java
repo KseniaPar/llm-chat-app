@@ -56,6 +56,39 @@ public class CompareRequestLogger {
         return block.toString();
     }
 
+    public String logReasoningCompareStart(String prompt) {
+        StringBuilder block = new StringBuilder();
+        appendLine(block, LINE);
+        appendLine(block, "COMPARE - Day 3 (4 reasoning methods)");
+        appendLine(block, "User prompt: \"" + prompt + "\"");
+        appendLine(block, LINE);
+        return block.toString();
+    }
+
+    public String logReasoningSummary(
+            int directLen,
+            int stepByStepLen,
+            int metaPromptLen,
+            int metaPromptAnswerLen,
+            int expertsLen,
+            int comparisonLen) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("direct", directLen);
+        summary.put("stepByStep", stepByStepLen);
+        summary.put("metaPrompt", metaPromptLen);
+        summary.put("metaPromptAnswer", metaPromptAnswerLen);
+        summary.put("experts", expertsLen);
+        summary.put("comparison", comparisonLen);
+
+        StringBuilder block = new StringBuilder();
+        appendLine(block, "");
+        appendLine(block, "=== SUMMARY (response length in chars) ===");
+        appendLine(block, toPrettyJson(summary));
+        appendLine(block, LINE);
+        appendLine(block, "");
+        return block.toString();
+    }
+
     public String logCompareSummary(
             int unrestrictedLen,
             int formatOnlyLen,

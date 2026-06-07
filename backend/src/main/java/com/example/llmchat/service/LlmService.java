@@ -2,6 +2,7 @@ package com.example.llmchat.service;
 
 import com.example.llmchat.dto.CompareResult;
 import com.example.llmchat.dto.LlmResult;
+import com.example.llmchat.dto.ReasoningCompareResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.Message;
@@ -42,6 +43,29 @@ public class LlmService {
     private static final int LENGTH_MAX_TOKENS = 80;
     private static final int FULL_MAX_TOKENS = 80;
     private static final List<String> STOP_SEQUENCES = List.of("END");
+
+    private static final String STEP_BY_STEP_PROMPT = """
+            Решай задачу пошагово. Покажи каждый шаг рассуждения и в конце дай финальный ответ.
+            """;
+    private static final String META_PROMPT_GENERATION = """
+            Составь промпт для решения следующей логической задачи.
+            Верни только текст промпта, без решения задачи.
+            """;
+    private static final String EXPERTS_PROMPT = """
+            Ты — модератор панели экспертов. Три эксперта по очереди решают одну логическую задачу:
+            1. Аналитик — разбирает условия, выделяет факты и ограничения.
+            2. Инженер — строит пошаговое решение на основе анализа.
+            3. Критик — проверяет логику решения инженера, указывает ошибки или подтверждает верность.
+            Каждый эксперт даёт своё решение с финальным ответом.
+            Оформи ответ с заголовками: Аналитик, Инженер, Критик.
+            """;
+    private static final String COMPARISON_PROMPT = """
+            Сравни 4 решения одной логической задачи разными методами.
+            Укажи:
+            1) Отличаются ли финальные ответы между методами?
+            2) Какой метод дал наиболее точный результат и почему?
+            3) Краткий вывод: какой способ рассуждения эффективнее для логических задач.
+            """;
 
     private final ChatModel chatModel;
     private final CompareRequestLogger compareLogger;
@@ -121,6 +145,77 @@ public class LlmService {
                 fullControl.length()));
 
         return new CompareResult(unrestricted, formatOnly, lengthOnly, stopOnly, fullControl, logs.toString());
+    }
+
+    public ReasoningCompareResult compareReasoning(String task) {
+        String llmUrl = baseUrl + "/v1/chat/completions";
+        StringBuilder logs = new StringBuilder();
+        logs.append(compareLogger.logReasoningCompareStart(task));
+
+        List<Message> directMessages = List.of(new UserMessage(task));
+        String direct = runCompareRequest(
+                logs, "Request 1: DIRECT", llmUrl, directMessages, null);
+
+        List<Message> stepByStepMessages = List.of(
+                new SystemMessage(STEP_BY_STEP_PROMPT),
+                new UserMessage(task));
+        String stepByStep = runCompareRequest(
+                logs, "Request 2: STEP BY STEP", llmUrl, stepByStepMessages, null);
+
+        List<Message> metaPromptGenMessages = List.of(
+                new SystemMessage(META_PROMPT_GENERATION),
+                new UserMessage(task));
+        String metaPrompt = runCompareRequest(
+                logs, "Request 3a: META PROMPT GENERATION", llmUrl, metaPromptGenMessages, null);
+
+        List<Message> metaPromptAnswerMessages = List.of(new UserMessage(metaPrompt));
+        String metaPromptAnswer = runCompareRequest(
+                logs, "Request 3b: META PROMPT ANSWER", llmUrl, metaPromptAnswerMessages, null);
+
+        List<Message> expertsMessages = List.of(
+                new SystemMessage(EXPERTS_PROMPT),
+                new UserMessage(task));
+        String experts = runCompareRequest(
+                logs, "Request 4: EXPERTS PANEL", llmUrl, expertsMessages, null);
+
+        String comparisonInput = """
+                Задача: %s
+
+                --- Прямой ответ ---
+                %s
+
+                --- Пошагово ---
+                %s
+
+                --- Мета-промпт (ответ) ---
+                %s
+
+                --- Эксперты ---
+                %s
+                """.formatted(task, direct, stepByStep, metaPromptAnswer, experts);
+
+        List<Message> comparisonMessages = List.of(
+                new SystemMessage(COMPARISON_PROMPT),
+                new UserMessage(comparisonInput));
+        String comparison = runCompareRequest(
+                logs, "Request 5: AUTO COMPARISON", llmUrl, comparisonMessages, null);
+
+        logs.append(compareLogger.logReasoningSummary(
+                direct.length(),
+                stepByStep.length(),
+                metaPrompt.length(),
+                metaPromptAnswer.length(),
+                experts.length(),
+                comparison.length()));
+
+        return new ReasoningCompareResult(
+                direct,
+                stepByStep,
+                metaPrompt,
+                metaPromptAnswer,
+                experts,
+                comparison,
+                logs.toString());
     }
 
     private String runCompareRequest(
