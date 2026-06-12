@@ -18,7 +18,7 @@ app:
     temperature: 0.5
     max-tokens: 512
   simulator:
-    model: deepseek/deepseek-chat-v3-0324
+    model: ${app.openrouter.model}
     system-prompt: |
       Ты симулируешь пользователя, который проверяет память агента.
       Пиши коротко, по-человечески, на русском.
