@@ -18,6 +18,13 @@ app:
       Если достаточно одного-двух предложений — ограничься ими.
     temperature: 0.5
     max-tokens: 512
+    context-window: 128000
+    pricing:
+      prompt-per-million: 0.15
+      completion-per-million: 0.60
+  token-demo:
+    overflow-turns: 5
+    overflow-prompt: prompts/Аристотель . Метафизика.txt
   simulator:
     model: ${app.openrouter.model}
     system-prompt: |
@@ -36,6 +43,8 @@ app:
 
 server:
   port: 8080
+  tomcat:
+    connection-timeout: 2700000
 
 logging:
   charset:

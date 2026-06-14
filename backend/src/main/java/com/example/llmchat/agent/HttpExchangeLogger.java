@@ -8,6 +8,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Component
@@ -26,7 +29,26 @@ public class HttpExchangeLogger {
                 "\nАгент\n  Session : {}\n  History : {} сообщ.\n  Prompt  : \"{}\"",
                 sessionId,
                 historySize,
-                userPrompt.replace("\"", "\\\""));
+                LogText.truncate(userPrompt).replace("\"", "\\\""));
+    }
+
+    public void logTokenEstimate(int currentPromptTokens, int historyTokens, int requestTokens, int contextLimit) {
+        log.info(
+                "\nТокены (оценка до запроса)\n  Текущий запрос : ~{}\n  История        : ~{}\n  Весь промпт    : ~{} / {}\n  Остаток окна   : ~{}",
+                currentPromptTokens,
+                historyTokens,
+                requestTokens,
+                contextLimit,
+                Math.max(0, contextLimit - requestTokens));
+    }
+
+    public void logTokenUsage(int promptTokens, int completionTokens, int totalTokens, double costUsd) {
+        log.info(
+                "\nТокены (факт API)\n  Prompt     : {}\n  Completion : {}\n  Total      : {}\n  Стоимость  : ${}",
+                promptTokens,
+                completionTokens,
+                totalTokens,
+                String.format("%.6f", costUsd));
     }
 
     public void logRequest(String method, String url, HttpHeaders headers, Object body) {
@@ -35,7 +57,7 @@ public class HttpExchangeLogger {
                 method,
                 url,
                 formatHeaders(headers),
-                prettyJson(body));
+                prettyJson(sanitizeBodyForLog(body)));
     }
 
     public void logResponse(int statusCode, HttpHeaders headers, String body) {
@@ -93,6 +115,44 @@ public class HttpExchangeLogger {
         }
         JsonNode node = objectMapper.readTree(raw);
         return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(node);
+    }
+
+    private Object sanitizeBodyForLog(Object body) {
+        if (!(body instanceof Map<?, ?> rawMap)) {
+            return body;
+        }
+
+        Map<String, Object> sanitized = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
+            String key = String.valueOf(entry.getKey());
+            Object value = entry.getValue();
+            if ("messages".equals(key) && value instanceof List<?> messages) {
+                sanitized.put(key, messages.stream()
+                        .map(this::sanitizeMessageForLog)
+                        .toList());
+            } else {
+                sanitized.put(key, value);
+            }
+        }
+        return sanitized;
+    }
+
+    private Object sanitizeMessageForLog(Object message) {
+        if (!(message instanceof Map<?, ?> rawMessage)) {
+            return message;
+        }
+
+        Map<String, Object> sanitized = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : rawMessage.entrySet()) {
+            String key = String.valueOf(entry.getKey());
+            Object value = entry.getValue();
+            if ("content".equals(key) && value instanceof String content) {
+                sanitized.put(key, LogText.truncate(content));
+            } else {
+                sanitized.put(key, value);
+            }
+        }
+        return sanitized;
     }
 
     private String indent(String text) {
