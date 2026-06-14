@@ -1,28 +1,20 @@
 const promptInput = document.getElementById('prompt');
 const sendBtn = document.getElementById('send-btn');
-const autoBtn = document.getElementById('auto-btn');
-const stopBtn = document.getElementById('stop-btn');
+const newDialogBtn = document.getElementById('new-dialog-btn');
 const loadingEl = document.getElementById('loading');
 const errorEl = document.getElementById('error');
 const messagesEl = document.getElementById('messages');
 
 const CHAR_DELAY_MS = 18;
-const SIMULATOR_GOAL = 'Чередовать советы по задаче и ненавязчивые проверки памяти агента (имя, задача, детали из истории)';
+const SESSION_STORAGE_KEY = 'llm-chat-session-id';
 
 let activeRequestId = 0;
-let autoDialogRequestId = 0;
 let sessionId = null;
-let autoDialogAbort = false;
 
 function setControlsDisabled(isDisabled) {
   sendBtn.disabled = isDisabled;
   promptInput.disabled = isDisabled;
-  autoBtn.disabled = isDisabled;
-}
-
-function setAutoDialogRunning(isRunning) {
-  autoBtn.classList.toggle('hidden', isRunning);
-  stopBtn.classList.toggle('hidden', !isRunning);
+  newDialogBtn.disabled = isDisabled;
 }
 
 function setLoading(isLoading) {
@@ -34,9 +26,54 @@ function showError(message) {
   errorEl.classList.remove('hidden');
 }
 
+function persistSessionId(value) {
+  if (value) {
+    localStorage.setItem(SESSION_STORAGE_KEY, value);
+  } else {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  }
+}
+
+async function restoreSessionFromStorage() {
+  const savedSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
+  if (!savedSessionId) {
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `/api/agent/history?sessionId=${encodeURIComponent(savedSessionId)}`,
+    );
+
+    if (!response.ok) {
+      persistSessionId(null);
+      return;
+    }
+
+    const data = await response.json();
+    sessionId = data.sessionId || savedSessionId;
+
+    for (const message of data.messages || []) {
+      const role = message.role === 'user' ? 'user' : 'assistant';
+      appendMessage(role, message.content);
+    }
+  } catch {
+    sessionId = savedSessionId;
+  }
+}
+
 function clearError() {
   errorEl.textContent = '';
   errorEl.classList.add('hidden');
+}
+
+function clearMessages() {
+  messagesEl.innerHTML = `
+    <div class="messages-empty">
+      <div class="messages-empty__icon" aria-hidden="true">💬</div>
+      <p>Начните диалог — напишите сообщение и нажмите Enter</p>
+    </div>
+  `;
 }
 
 function clearEmptyState() {
@@ -101,56 +138,19 @@ function appendMessage(role, text) {
   scrollToBottom();
 }
 
-async function revealText(textEl, text, shouldAbort = () => false) {
+async function revealText(textEl, text) {
   textEl.textContent = '';
 
   for (const char of text) {
-    if (shouldAbort()) {
-      textEl.textContent = text;
-      scrollToBottom();
-      return false;
-    }
-
     textEl.textContent += char;
     scrollToBottom();
     await sleep(CHAR_DELAY_MS);
   }
-
-  return true;
 }
 
-async function appendMessageGradually(role, text, shouldAbort = () => false) {
+async function appendMessageGradually(role, text) {
   const textEl = createMessageElement(role);
-  return revealText(textEl, text, shouldAbort);
-}
-
-async function typeInInput(text) {
-  promptInput.value = '';
-  resizeInput();
-
-  for (const char of text) {
-    if (autoDialogAbort) {
-      return false;
-    }
-
-    promptInput.value += char;
-    resizeInput();
-    await sleep(CHAR_DELAY_MS);
-  }
-
-  return true;
-}
-
-async function sendSimulatedUserMessage(text) {
-  const typed = await typeInInput(text);
-  if (!typed) {
-    return false;
-  }
-
-  promptInput.value = '';
-  resizeInput();
-  appendMessage('user', text);
-  return true;
+  await revealText(textEl, text);
 }
 
 async function parseErrorResponse(response) {
@@ -193,6 +193,7 @@ async function sendMessage(prompt) {
 
     const data = await response.json();
     sessionId = data.sessionId || sessionId;
+    persistSessionId(sessionId);
     const assistantReply = data.response || 'Пустой ответ от агента.';
 
     setLoading(false);
@@ -217,113 +218,36 @@ async function sendMessage(prompt) {
   }
 }
 
-async function fetchSimulatorNext(currentSessionId) {
-  const payload = { goal: SIMULATOR_GOAL };
-  if (currentSessionId) {
-    payload.sessionId = currentSessionId;
-  }
-
-  const response = await fetch('/api/simulator/next', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const errorMessage = await parseErrorResponse(response);
-    throw new Error(errorMessage);
-  }
-
-  return response.json();
-}
-
-async function fetchAgentReply(prompt, currentSessionId) {
-  const payload = { prompt, sessionId: currentSessionId };
-
-  const response = await fetch('/api/agent/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const errorMessage = await parseErrorResponse(response);
-    throw new Error(errorMessage);
-  }
-
-  return response.json();
-}
-
 function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
 }
 
-async function runAutoDialog() {
+async function startNewDialog() {
   clearError();
-  autoDialogAbort = false;
-  sessionId = null;
-  const requestId = ++autoDialogRequestId;
-  setAutoDialogRunning(true);
-  setControlsDisabled(true);
-
-  try {
-    while (!autoDialogAbort && requestId === autoDialogRequestId) {
-      const simData = await fetchSimulatorNext(sessionId);
-
-      if (autoDialogAbort || requestId !== autoDialogRequestId) {
-        break;
-      }
-
-      sessionId = simData.sessionId || sessionId;
-
-      if (!simData.userMessage) {
-        continue;
-      }
-
-      const sent = await sendSimulatedUserMessage(simData.userMessage);
-      if (!sent || autoDialogAbort || requestId !== autoDialogRequestId) {
-        break;
-      }
-
-      setLoading(true);
-      const agentData = await fetchAgentReply(simData.userMessage, sessionId);
-      setLoading(false);
-
-      sessionId = agentData.sessionId || sessionId;
-      const assistantReply = agentData.response || 'Пустой ответ от агента.';
-      await appendMessageGradually(
-        'assistant',
-        assistantReply,
-        () => autoDialogAbort || requestId !== autoDialogRequestId,
-      );
-
-      if (autoDialogAbort || requestId !== autoDialogRequestId) {
-        break;
-      }
-    }
-  } catch (error) {
-    showError(
-      error.message.includes('Failed to fetch')
-        ? 'Не удалось связаться с backend. Убедитесь, что Spring Boot запущен на порту 8080.'
-        : error.message
-    );
-  } finally {
-    autoDialogAbort = false;
-    setLoading(false);
-    setAutoDialogRunning(false);
-    setControlsDisabled(false);
-    promptInput.value = '';
-    resizeInput();
-    promptInput.focus();
-  }
-}
-
-function stopAutoDialog() {
-  autoDialogAbort = true;
-  autoDialogRequestId += 1;
   activeRequestId += 1;
+
+  const previousSessionId = sessionId;
+  sessionId = null;
+  persistSessionId(null);
+  clearMessages();
+
+  if (previousSessionId) {
+    try {
+      await fetch('/api/agent/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: previousSessionId }),
+      });
+    } catch {
+      showError('Не удалось сбросить сессию на сервере. Новый диалог начнётся локально.');
+    }
+  }
+
+  promptInput.value = '';
+  resizeInput();
+  promptInput.focus();
 }
 
 async function sendPrompt() {
@@ -341,8 +265,7 @@ async function sendPrompt() {
 }
 
 sendBtn.addEventListener('click', sendPrompt);
-autoBtn.addEventListener('click', runAutoDialog);
-stopBtn.addEventListener('click', stopAutoDialog);
+newDialogBtn.addEventListener('click', startNewDialog);
 
 promptInput.addEventListener('input', resizeInput);
 
@@ -354,4 +277,6 @@ promptInput.addEventListener('keydown', (event) => {
 });
 
 resizeInput();
-promptInput.focus();
+restoreSessionFromStorage().finally(() => {
+  promptInput.focus();
+});
