@@ -12,16 +12,12 @@
 
     <artifactId>llm-chat-backend</artifactId>
     <name>llm-chat-backend</name>
-    <description>Spring Boot backend with OpenRouter LLM integration</description>
+    <description>Spring Boot backend with OpenRouter agent</description>
 
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-openai</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

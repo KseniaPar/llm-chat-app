@@ -3,21 +3,35 @@ spring:
     active: local
   application:
     name: llm-chat-app
-  ai:
-    openai:
-      api-key: ${OPENROUTER_API_KEY}
-      base-url: https://openrouter.ai/api
-      chat:
-        options:
-          model: openai/gpt-4o-mini
 
 app:
-  compare-models:
-    weak: openai/gpt-oss-20b:free
-    medium: openai/gpt-4o-mini
-    strong: openai/gpt-oss-120b:free
-    max-tokens: 180
+  openrouter:
+    api-key: ${OPENROUTER_API_KEY}
+    base-url: https://openrouter.ai/api
+    model: openai/gpt-4o-mini
+  agent:
+    system-prompt: |
+      Ты — полезный ассистент. Отвечай кратко и по делу.
+      Без лишних вступлений, повторов и общих фраз.
+      Давай только нужную информацию по запросу пользователя.
+      Если достаточно одного-двух предложений — ограничься ими.
+    temperature: 0.5
+    max-tokens: 512
+  simulator:
+    model: ${app.openrouter.model}
+    system-prompt: |
+      Ты генерируешь ТОЛЬКО следующее сообщение пользователя в чате на русском.
+      Ты — пользователь, не ассистент. Пиши от первого лица («я», «мне», «мой»).
+      Никогда не давай советов от лица агента и не обращайся к себе по имени на «ты»
+      (не «Алекс, ты можешь…», а «я думаю…», «мне нужно…»).
+      Не начинай с «Конечно», «Рекомендую», «Можно попробовать» — это реплики агента.
+      Регулярно проверяй память агента невзначай — вплетай имя, задачу, детали из истории.
+      Запрещены прямые вопросы: «как меня зовут?», «что я просил?», «перескажи», «помнишь?».
+      Без меток в скобках.
     temperature: 0.7
+    max-tokens: 256
+    stop-marker: "[DONE]"
+    default-max-turns: 8
 
 server:
   port: 8080

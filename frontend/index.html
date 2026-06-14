@@ -3,97 +3,52 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 5 — Сравнение моделей</title>
+  <title>День 6 — Первый агент</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <main class="container">
-    <header class="header">
-      <h1>День 5 — Сравнение моделей</h1>
-      <p class="subtitle">Один и тот же запрос на слабой, средней и сильной модели — сравнение качества, скорости и ресурсоёмкости.</p>
-    </header>
-
-    <section class="chat-card">
-      <label for="prompt" class="label">Запрос к LLM</label>
-      <textarea
-        id="prompt"
-        class="prompt-input"
-        rows="4"
-        placeholder="Объясни, как работает блокчейн, простыми словами для новичка (3–5 предложений)."
-      ></textarea>
-
-      <div class="demo-section">
-        <span class="demo-label">Примеры для демо</span>
-        <div class="demo-buttons" role="group" aria-label="Примеры запросов">
-          <button type="button" class="demo-btn" data-demo="reasoning">Логическая задача</button>
-          <button type="button" class="demo-btn" data-demo="explain">Сложное объяснение</button>
-          <button type="button" class="demo-btn" data-demo="code">Генерация кода</button>
-          <button type="button" class="demo-btn" data-demo="analysis">Сравнение плюсов/минусов</button>
+  <main class="app">
+    <section class="chat-shell">
+      <header class="chat-header">
+        <div class="chat-header__avatar" aria-hidden="true">AI</div>
+        <div class="chat-header__info">
+          <h1>Агент</h1>
+          <p>День 6 — первый агент с памятью диалога</p>
         </div>
-      </div>
+        <span id="loading" class="chat-header__status hidden" aria-live="polite">
+          <span class="typing-dots"><span></span><span></span><span></span></span>
+          печатает
+        </span>
+        <button id="auto-btn" class="chat-header__action" type="button">Авто-диалог</button>
+        <button id="stop-btn" class="chat-header__action chat-header__action--stop hidden" type="button">Стоп</button>
+      </header>
 
-      <div class="actions">
-        <button id="send-btn" class="send-btn" type="button">Сравнить модели</button>
-        <span id="loading" class="loading hidden" aria-live="polite">Думаю...</span>
+      <div id="messages" class="messages" aria-live="polite">
+        <div class="messages-empty">
+          <div class="messages-empty__icon" aria-hidden="true">💬</div>
+          <p>Начните диалог — напишите сообщение и нажмите Enter</p>
+        </div>
       </div>
 
       <div id="error" class="error hidden" role="alert"></div>
 
-      <div class="workspace">
-        <div class="responses-panel">
-          <div class="compare-grid compare-grid--models">
-            <div class="response-section">
-              <h2 class="response-title">Слабая (20B)</h2>
-              <p class="hint">GPT-OSS 20B (free) — быстрая, минимум ресурсов</p>
-              <div id="response-model-weak" class="response-box response-box--model-weak">Ответ появится здесь.</div>
-              <div id="metrics-model-weak" class="metrics-block hidden"></div>
-            </div>
-
-            <div class="response-section">
-              <h2 class="response-title">Средняя (GPT-4o mini)</h2>
-              <p class="hint">OpenAI GPT-4o mini — стабильная, недорогая (~$0.0001 за запрос)</p>
-              <div id="response-model-medium" class="response-box response-box--model-medium">Ответ появится здесь.</div>
-              <div id="metrics-model-medium" class="metrics-block hidden"></div>
-            </div>
-
-            <div class="response-section">
-              <h2 class="response-title">Сильная (120B)</h2>
-              <p class="hint">GPT-OSS 120B (free) — максимальное качество, больше ресурсов</p>
-              <div id="response-model-strong" class="response-box response-box--model-strong">Ответ появится здесь.</div>
-              <div id="metrics-model-strong" class="metrics-block hidden"></div>
-            </div>
-          </div>
-
-          <div class="response-section response-section--comparison">
-            <h2 class="response-title">Сравнение и выводы</h2>
-            <p class="hint">Автоматический анализ: качество, скорость, ресурсоёмкость и рекомендации по выбору модели</p>
-            <div id="response-comparison" class="response-box response-box--comparison">Сравнение появится здесь.</div>
-          </div>
-
-          <div class="response-section response-section--conclusions">
-            <h2 class="response-title">Когда выбирать каждую модель</h2>
-            <div class="conclusions-grid">
-              <div class="conclusion-card conclusion-card--weak">
-                <h3>Слабая (20B)</h3>
-                <p>Классификация, простые FAQ, черновики, высокая нагрузка и жёсткие лимиты по latency. Когда важнее скорость и экономия, чем глубина.</p>
-              </div>
-              <div class="conclusion-card conclusion-card--medium">
-                <h3>Средняя (GPT-4o mini)</h3>
-                <p>Универсальный режим: объяснения, суммаризация, помощь в обучении — стабильная модель с минимальной стоимостью.</p>
-              </div>
-              <div class="conclusion-card conclusion-card--strong">
-                <h3>Сильная (120B)</h3>
-                <p>Сложные рассуждения, анализ, юридические и технические тексты, задачи где ошибка дорого стоит. Медленнее, но точнее и полнее.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="logs-panel">
-          <h2 class="response-title">Логи API</h2>
-          <pre id="logs" class="logs-box">Логи запросов появятся здесь.</pre>
-        </div>
-      </div>
+      <footer class="composer">
+        <textarea
+          id="prompt"
+          class="composer__input"
+          rows="1"
+          placeholder="Напишите сообщение..."
+        ></textarea>
+        <button id="send-btn" class="composer__send" type="button" aria-label="Отправить">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M22 2 11 13"></path>
+            <path d="M22 2 15 22 11 13 2 9 22 2"></path>
+          </svg>
+        </button>
+      </footer>
     </section>
   </main>
 

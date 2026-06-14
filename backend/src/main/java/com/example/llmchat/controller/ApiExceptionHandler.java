@@ -1,6 +1,6 @@
 package com.example.llmchat.controller;
 
-import org.springframework.ai.retry.NonTransientAiException;
+import com.example.llmchat.agent.OpenRouterHttpException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -16,10 +16,10 @@ public class ApiExceptionHandler {
 
     private static final Pattern RAW_MESSAGE = Pattern.compile("\"raw\"\\s*:\\s*\"([^\"]+)\"");
 
-    @ExceptionHandler(NonTransientAiException.class)
-    public ResponseEntity<Map<String, String>> handleAiException(NonTransientAiException exception) {
+    @ExceptionHandler(OpenRouterHttpException.class)
+    public ResponseEntity<Map<String, String>> handleOpenRouterHttpException(OpenRouterHttpException exception) {
         String message = exception.getMessage() != null ? exception.getMessage() : "OpenRouter error";
-        HttpStatus status = resolveStatus(message);
+        HttpStatus status = resolveOpenRouterStatus(exception.statusCode());
         Map<String, String> body = new LinkedHashMap<>();
         body.put("error", extractReadableMessage(message));
         return ResponseEntity.status(status).body(body);
@@ -32,14 +32,13 @@ public class ApiExceptionHandler {
         return ResponseEntity.badRequest().body(body);
     }
 
-    private HttpStatus resolveStatus(String message) {
-        if (message.contains("429")) {
-            return HttpStatus.TOO_MANY_REQUESTS;
-        }
-        if (message.contains("404")) {
-            return HttpStatus.BAD_GATEWAY;
-        }
-        return HttpStatus.BAD_GATEWAY;
+    private HttpStatus resolveOpenRouterStatus(int statusCode) {
+        return switch (statusCode) {
+            case 429 -> HttpStatus.TOO_MANY_REQUESTS;
+            case 402 -> HttpStatus.PAYMENT_REQUIRED;
+            case 404 -> HttpStatus.BAD_GATEWAY;
+            default -> HttpStatus.BAD_GATEWAY;
+        };
     }
 
     private String extractReadableMessage(String message) {
@@ -52,6 +51,9 @@ public class ApiExceptionHandler {
         }
         if (message.contains("429")) {
             return "Лимит запросов OpenRouter (429). Подождите 10–30 секунд и попробуйте снова.";
+        }
+        if (message.contains("402") || message.contains("requires more credits")) {
+            return "Недостаточно кредитов OpenRouter (402). Уменьшите max-tokens в application.yml или пополните баланс на openrouter.ai/settings/credits.";
         }
         return message.length() > 300 ? message.substring(0, 300) + "..." : message;
     }

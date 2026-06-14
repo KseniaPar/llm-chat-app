@@ -1,56 +1,32 @@
 const promptInput = document.getElementById('prompt');
 const sendBtn = document.getElementById('send-btn');
+const autoBtn = document.getElementById('auto-btn');
+const stopBtn = document.getElementById('stop-btn');
 const loadingEl = document.getElementById('loading');
 const errorEl = document.getElementById('error');
-const comparisonEl = document.getElementById('response-comparison');
-const logsEl = document.getElementById('logs');
+const messagesEl = document.getElementById('messages');
 
-const demoExamples = {
-  reasoning: `У Маши было 8 конфет. Она съела 3 и купила ещё 5. Сколько конфет стало? Реши пошагово и объясни каждый шаг.`,
-  explain: `Объясни, как работает блокчейн, простыми словами для новичка. Не более 5 предложений.`,
-  code: `Напиши функцию на Python, которая проверяет, является ли строка палиндромом. Добавь краткий комментарий к коду.`,
-  analysis: `Сравни плюсы и минусы удалённой работы. Дай ровно 4 пункта: 2 за, 2 против.`,
-};
-
-const modelRequests = [
-  {
-    responseEl: document.getElementById('response-model-weak'),
-    metricsEl: document.getElementById('metrics-model-weak'),
-    tier: 'weak',
-    key: 'weak',
-    label: 'Слабая (20B)',
-  },
-  {
-    responseEl: document.getElementById('response-model-medium'),
-    metricsEl: document.getElementById('metrics-model-medium'),
-    tier: 'medium',
-    key: 'medium',
-    label: 'Средняя (GPT-4o mini)',
-  },
-  {
-    responseEl: document.getElementById('response-model-strong'),
-    metricsEl: document.getElementById('metrics-model-strong'),
-    tier: 'strong',
-    key: 'strong',
-    label: 'Сильная (120B)',
-  },
-];
-
-const modelCount = modelRequests.length;
+const CHAR_DELAY_MS = 18;
+const SIMULATOR_GOAL = 'Чередовать советы по задаче и ненавязчивые проверки памяти агента (имя, задача, детали из истории)';
 
 let activeRequestId = 0;
+let autoDialogRequestId = 0;
+let sessionId = null;
+let autoDialogAbort = false;
 
-function setLoading(isLoading, message = 'Думаю...') {
-  sendBtn.disabled = isLoading;
-  document.querySelectorAll('.demo-btn').forEach((button) => {
-    button.disabled = isLoading;
-  });
-  loadingEl.textContent = message;
-  loadingEl.classList.toggle('hidden', !isLoading);
+function setControlsDisabled(isDisabled) {
+  sendBtn.disabled = isDisabled;
+  promptInput.disabled = isDisabled;
+  autoBtn.disabled = isDisabled;
 }
 
-function setPanelLoading(el, isLoading) {
-  el.classList.toggle('response-box--loading', isLoading);
+function setAutoDialogRunning(isRunning) {
+  autoBtn.classList.toggle('hidden', isRunning);
+  stopBtn.classList.toggle('hidden', !isRunning);
+}
+
+function setLoading(isLoading) {
+  loadingEl.classList.toggle('hidden', !isLoading);
 }
 
 function showError(message) {
@@ -63,85 +39,216 @@ function clearError() {
   errorEl.classList.add('hidden');
 }
 
-function formatCost(costUsd) {
-  if (costUsd === 0 || costUsd === 0.0) {
-    return '$0.00 (бесплатно)';
+function clearEmptyState() {
+  const empty = messagesEl.querySelector('.messages-empty');
+  if (empty) {
+    empty.remove();
   }
-  return `$${costUsd.toFixed(6)}`;
 }
 
-function renderMetrics(el, metrics) {
-  if (!metrics) {
-    el.classList.add('hidden');
-    el.textContent = '';
-    return;
-  }
-
-  el.classList.remove('hidden');
-  el.innerHTML = `
-    <dl class="metrics-list">
-      <div><dt>Время</dt><dd>${metrics.responseTimeMs} ms</dd></div>
-      <div><dt>Prompt tokens</dt><dd>${metrics.promptTokens}</dd></div>
-      <div><dt>Completion tokens</dt><dd>${metrics.completionTokens}</dd></div>
-      <div><dt>Total tokens</dt><dd>${metrics.totalTokens}</dd></div>
-      <div><dt>Стоимость</dt><dd>${formatCost(metrics.costUsd)}</dd></div>
-      <div class="metrics-model-id"><dt>Модель</dt><dd>${metrics.modelId}</dd></div>
-    </dl>
-  `;
+function resizeInput() {
+  promptInput.style.height = 'auto';
+  const maxHeight = 120;
+  const nextHeight = Math.min(promptInput.scrollHeight, maxHeight);
+  promptInput.style.height = `${nextHeight}px`;
+  promptInput.style.overflowY = promptInput.scrollHeight > maxHeight ? 'auto' : 'hidden';
 }
 
-function clearResponses() {
-  modelRequests.forEach(({ responseEl, metricsEl }) => {
-    responseEl.textContent = '';
-    setPanelLoading(responseEl, false);
-    renderMetrics(metricsEl, null);
-  });
-  comparisonEl.textContent = '';
-  comparisonEl.classList.remove('response-box--loading');
-  logsEl.textContent = '';
+function scrollToBottom() {
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function getMessageMeta(role) {
+  if (role === 'user') {
+    return { avatar: 'Вы', label: 'Вы' };
+  }
+  return { avatar: 'AI', label: 'Агент' };
+}
+
+function createMessageElement(role) {
+  clearEmptyState();
+
+  const messageEl = document.createElement('article');
+  messageEl.className = `message message--${role}`;
+
+  const { avatar, label } = getMessageMeta(role);
+
+  const avatarEl = document.createElement('div');
+  avatarEl.className = 'message__avatar';
+  avatarEl.textContent = avatar;
+  avatarEl.setAttribute('aria-hidden', 'true');
+
+  const bubbleEl = document.createElement('div');
+  bubbleEl.className = 'message__bubble';
+
+  const labelEl = document.createElement('span');
+  labelEl.className = 'message__label';
+  labelEl.textContent = label;
+
+  const textEl = document.createElement('div');
+  textEl.className = 'message__text';
+
+  bubbleEl.append(labelEl, textEl);
+  messageEl.append(avatarEl, bubbleEl);
+  messagesEl.appendChild(messageEl);
+
+  return textEl;
+}
+
+function appendMessage(role, text) {
+  const textEl = createMessageElement(role);
+  textEl.textContent = text;
+  scrollToBottom();
+}
+
+async function revealText(textEl, text, shouldAbort = () => false) {
+  textEl.textContent = '';
+
+  for (const char of text) {
+    if (shouldAbort()) {
+      textEl.textContent = text;
+      scrollToBottom();
+      return false;
+    }
+
+    textEl.textContent += char;
+    scrollToBottom();
+    await sleep(CHAR_DELAY_MS);
+  }
+
+  return true;
+}
+
+async function appendMessageGradually(role, text, shouldAbort = () => false) {
+  const textEl = createMessageElement(role);
+  return revealText(textEl, text, shouldAbort);
+}
+
+async function typeInInput(text) {
+  promptInput.value = '';
+  resizeInput();
+
+  for (const char of text) {
+    if (autoDialogAbort) {
+      return false;
+    }
+
+    promptInput.value += char;
+    resizeInput();
+    await sleep(CHAR_DELAY_MS);
+  }
+
+  return true;
+}
+
+async function sendSimulatedUserMessage(text) {
+  const typed = await typeInInput(text);
+  if (!typed) {
+    return false;
+  }
+
+  promptInput.value = '';
+  resizeInput();
+  appendMessage('user', text);
+  return true;
 }
 
 async function parseErrorResponse(response) {
-  const text = await response.text();
   try {
-    const json = JSON.parse(text);
-    return json.error || json.message || text;
+    const data = await response.json();
+    return data.error || data.message || `Сервер вернул ошибку: ${response.status}`;
   } catch {
-    return text || `Сервер вернул ошибку: ${response.status}`;
+    return `Сервер вернул ошибку: ${response.status}`;
   }
 }
 
-async function fetchModel(prompt, tier) {
-  const response = await fetch('/api/chat/model', {
+async function sendMessage(prompt) {
+  const requestId = ++activeRequestId;
+
+  setControlsDisabled(true);
+  appendMessage('user', prompt);
+
+  const payload = { prompt };
+  if (sessionId) {
+    payload.sessionId = sessionId;
+  }
+
+  try {
+    setLoading(true);
+
+    const response = await fetch('/api/agent/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (requestId !== activeRequestId) {
+      return false;
+    }
+
+    if (!response.ok) {
+      const errorMessage = await parseErrorResponse(response);
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    sessionId = data.sessionId || sessionId;
+    const assistantReply = data.response || 'Пустой ответ от агента.';
+
+    setLoading(false);
+    await appendMessageGradually('assistant', assistantReply);
+    return true;
+  } catch (error) {
+    if (requestId !== activeRequestId) {
+      return false;
+    }
+
+    showError(
+      error.message.includes('Failed to fetch')
+        ? 'Не удалось связаться с backend. Убедитесь, что Spring Boot запущен на порту 8080.'
+        : error.message
+    );
+    return false;
+  } finally {
+    if (requestId === activeRequestId) {
+      setLoading(false);
+      setControlsDisabled(false);
+    }
+  }
+}
+
+async function fetchSimulatorNext(currentSessionId) {
+  const payload = { goal: SIMULATOR_GOAL };
+  if (currentSessionId) {
+    payload.sessionId = currentSessionId;
+  }
+
+  const response = await fetch('/api/simulator/next', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, tier }),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
-    throw new Error(await parseErrorResponse(response));
+    const errorMessage = await parseErrorResponse(response);
+    throw new Error(errorMessage);
   }
 
   return response.json();
 }
 
-async function fetchComparison(prompt, answers, metrics) {
-  const response = await fetch('/api/chat/compare-models-analysis', {
+async function fetchAgentReply(prompt, currentSessionId) {
+  const payload = { prompt, sessionId: currentSessionId };
+
+  const response = await fetch('/api/agent/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      prompt,
-      weak: answers.weak,
-      medium: answers.medium,
-      strong: answers.strong,
-      weakMetrics: metrics.weak,
-      mediumMetrics: metrics.medium,
-      strongMetrics: metrics.strong,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
-    throw new Error(await parseErrorResponse(response));
+    const errorMessage = await parseErrorResponse(response);
+    throw new Error(errorMessage);
   }
 
   return response.json();
@@ -153,127 +260,98 @@ function sleep(ms) {
   });
 }
 
+async function runAutoDialog() {
+  clearError();
+  autoDialogAbort = false;
+  sessionId = null;
+  const requestId = ++autoDialogRequestId;
+  setAutoDialogRunning(true);
+  setControlsDisabled(true);
+
+  try {
+    while (!autoDialogAbort && requestId === autoDialogRequestId) {
+      const simData = await fetchSimulatorNext(sessionId);
+
+      if (autoDialogAbort || requestId !== autoDialogRequestId) {
+        break;
+      }
+
+      sessionId = simData.sessionId || sessionId;
+
+      if (!simData.userMessage) {
+        continue;
+      }
+
+      const sent = await sendSimulatedUserMessage(simData.userMessage);
+      if (!sent || autoDialogAbort || requestId !== autoDialogRequestId) {
+        break;
+      }
+
+      setLoading(true);
+      const agentData = await fetchAgentReply(simData.userMessage, sessionId);
+      setLoading(false);
+
+      sessionId = agentData.sessionId || sessionId;
+      const assistantReply = agentData.response || 'Пустой ответ от агента.';
+      await appendMessageGradually(
+        'assistant',
+        assistantReply,
+        () => autoDialogAbort || requestId !== autoDialogRequestId,
+      );
+
+      if (autoDialogAbort || requestId !== autoDialogRequestId) {
+        break;
+      }
+    }
+  } catch (error) {
+    showError(
+      error.message.includes('Failed to fetch')
+        ? 'Не удалось связаться с backend. Убедитесь, что Spring Boot запущен на порту 8080.'
+        : error.message
+    );
+  } finally {
+    autoDialogAbort = false;
+    setLoading(false);
+    setAutoDialogRunning(false);
+    setControlsDisabled(false);
+    promptInput.value = '';
+    resizeInput();
+    promptInput.focus();
+  }
+}
+
+function stopAutoDialog() {
+  autoDialogAbort = true;
+  autoDialogRequestId += 1;
+  activeRequestId += 1;
+}
+
 async function sendPrompt() {
   const prompt = promptInput.value.trim();
   if (!prompt) {
-    showError('Введите запрос перед отправкой.');
+    showError('Введите сообщение перед отправкой.');
     return;
   }
 
-  const requestId = ++activeRequestId;
   clearError();
-  clearResponses();
-  setLoading(true, 'Запросы отправляются по очереди...');
-
-  const answers = { weak: '', medium: '', strong: '' };
-  const metricsByTier = { weak: null, medium: null, strong: null };
-  const logChunks = [];
-  let completedCount = 0;
-  let hasError = false;
-
-  comparisonEl.textContent = `Появится после получения всех ${modelCount} ответов...`;
-  comparisonEl.classList.add('response-box--loading');
-
-  for (const { responseEl, metricsEl, tier, key, label } of modelRequests) {
-    if (requestId !== activeRequestId) {
-      return;
-    }
-
-    responseEl.textContent = 'Ожидание ответа...';
-    setPanelLoading(responseEl, true);
-    setLoading(true, `Запрос к модели: ${label}...`);
-
-    try {
-      const data = await fetchModel(prompt, tier);
-      if (requestId !== activeRequestId) {
-        return;
-      }
-
-      const answer = data.response || 'Пустой ответ от LLM.';
-      answers[key] = answer;
-      metricsByTier[key] = data.metrics || null;
-      responseEl.textContent = answer;
-      renderMetrics(metricsEl, data.metrics);
-      setPanelLoading(responseEl, false);
-
-      if (Array.isArray(data.logs)) {
-        logChunks.push(`=== ${label} ===\n${data.logs.join('\n')}`);
-      }
-
-      completedCount += 1;
-      setLoading(true, `Получено ${completedCount} из ${modelCount} ответов...`);
-    } catch (error) {
-      if (requestId !== activeRequestId) {
-        return;
-      }
-      hasError = true;
-      responseEl.textContent = 'Ошибка получения ответа.';
-      setPanelLoading(responseEl, false);
-      showError(
-        error.message.includes('Failed to fetch')
-          ? 'Не удалось связаться с backend. Убедитесь, что Spring Boot запущен на порту 8080.'
-          : error.message
-      );
-      break;
-    }
-
-    if (completedCount < modelCount) {
-      await sleep(3000);
-    }
-  }
-
-  if (requestId !== activeRequestId) {
-    return;
-  }
-
-  const allAnswersReady = modelRequests.every(({ key }) => answers[key]);
-  const allMetricsReady = modelRequests.every(({ key }) => metricsByTier[key]);
-  if (!hasError && allAnswersReady && allMetricsReady) {
-    setLoading(true, 'Формирую сравнение...');
-    try {
-      const comparisonData = await fetchComparison(prompt, answers, metricsByTier);
-      if (requestId !== activeRequestId) {
-        return;
-      }
-
-      comparisonEl.textContent = comparisonData.response || 'Пустой ответ от LLM.';
-      if (Array.isArray(comparisonData.logs)) {
-        logChunks.push(`=== Сравнение ===\n${comparisonData.logs.join('\n')}`);
-      }
-    } catch (error) {
-      comparisonEl.textContent = 'Не удалось получить сравнение.';
-      showError(error.message);
-    }
-  } else if (hasError) {
-    comparisonEl.textContent = 'Сравнение недоступно из-за ошибки.';
-  }
-
-  comparisonEl.classList.remove('response-box--loading');
-  logsEl.textContent = logChunks.join('\n\n') || 'Логи не получены.';
-  setLoading(false);
-}
-
-function selectDemo(demoId) {
-  const text = demoExamples[demoId];
-  if (!text) {
-    return;
-  }
-  promptInput.value = text;
-  clearError();
+  promptInput.value = '';
+  resizeInput();
+  await sendMessage(prompt);
   promptInput.focus();
 }
 
 sendBtn.addEventListener('click', sendPrompt);
+autoBtn.addEventListener('click', runAutoDialog);
+stopBtn.addEventListener('click', stopAutoDialog);
 
-document.querySelectorAll('.demo-btn').forEach((button) => {
-  button.addEventListener('click', () => {
-    selectDemo(button.dataset.demo);
-  });
-});
+promptInput.addEventListener('input', resizeInput);
 
 promptInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+  if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     sendPrompt();
   }
 });
+
+resizeInput();
+promptInput.focus();
