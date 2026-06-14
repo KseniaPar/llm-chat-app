@@ -7,7 +7,7 @@ const errorEl = document.getElementById('error');
 const messagesEl = document.getElementById('messages');
 
 const CHAR_DELAY_MS = 18;
-const SIMULATOR_GOAL = 'Проверить, насколько хорошо агент помнит контекст: имя, задачу, детали и предыдущие сообщения';
+const SIMULATOR_GOAL = 'Чередовать советы по задаче и ненавязчивые проверки памяти агента (имя, задача, детали из истории)';
 
 let activeRequestId = 0;
 let autoDialogRequestId = 0;
@@ -101,11 +101,13 @@ function appendMessage(role, text) {
   scrollToBottom();
 }
 
-async function revealText(textEl, text) {
+async function revealText(textEl, text, shouldAbort = () => false) {
   textEl.textContent = '';
 
   for (const char of text) {
-    if (autoDialogAbort) {
+    if (shouldAbort()) {
+      textEl.textContent = text;
+      scrollToBottom();
       return false;
     }
 
@@ -117,9 +119,9 @@ async function revealText(textEl, text) {
   return true;
 }
 
-async function appendMessageGradually(role, text) {
+async function appendMessageGradually(role, text, shouldAbort = () => false) {
   const textEl = createMessageElement(role);
-  return revealText(textEl, text);
+  return revealText(textEl, text, shouldAbort);
 }
 
 async function typeInInput(text) {
@@ -289,13 +291,17 @@ async function runAutoDialog() {
       const agentData = await fetchAgentReply(simData.userMessage, sessionId);
       setLoading(false);
 
+      sessionId = agentData.sessionId || sessionId;
+      const assistantReply = agentData.response || 'Пустой ответ от агента.';
+      await appendMessageGradually(
+        'assistant',
+        assistantReply,
+        () => autoDialogAbort || requestId !== autoDialogRequestId,
+      );
+
       if (autoDialogAbort || requestId !== autoDialogRequestId) {
         break;
       }
-
-      sessionId = agentData.sessionId || sessionId;
-      const assistantReply = agentData.response || 'Пустой ответ от агента.';
-      await appendMessageGradually('assistant', assistantReply);
     }
   } catch (error) {
     showError(
@@ -304,6 +310,7 @@ async function runAutoDialog() {
         : error.message
     );
   } finally {
+    autoDialogAbort = false;
     setLoading(false);
     setAutoDialogRunning(false);
     setControlsDisabled(false);

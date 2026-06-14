@@ -43,13 +43,26 @@ public class UserSimulator {
         List<OpenRouterHttpClient.ChatMessage> messages = new ArrayList<>();
         messages.add(new OpenRouterHttpClient.ChatMessage("system", buildSystemPrompt(goal)));
 
-        for (AgentChatMessage entry : history) {
-            messages.add(new OpenRouterHttpClient.ChatMessage(entry.role(), entry.content()));
-        }
-
-        messages.add(new OpenRouterHttpClient.ChatMessage("user", buildInstruction(history)));
+        String userPrompt = history.isEmpty()
+                ? buildInstruction(history)
+                : formatTranscript(history) + "\n\n" + buildInstruction(history);
+        messages.add(new OpenRouterHttpClient.ChatMessage("user", userPrompt));
 
         return messages;
+    }
+
+    private String formatTranscript(List<AgentChatMessage> history) {
+        StringBuilder transcript = new StringBuilder("""
+                Переписка. Ты — пользователь (сообщения «Ты»). Агент — собеседник, не ты.
+                """);
+        for (AgentChatMessage entry : history) {
+            if ("user".equals(entry.role())) {
+                transcript.append("\nТы: ").append(entry.content());
+            } else {
+                transcript.append("\nАгент: ").append(entry.content());
+            }
+        }
+        return transcript.toString().trim();
     }
 
     private String buildSystemPrompt(String goal) {
@@ -62,7 +75,7 @@ public class UserSimulator {
     private String buildInstruction(List<AgentChatMessage> history) {
         if (history.isEmpty()) {
             return """
-                    Начни сценарий. Напиши только первое сообщение пользователя:
+                    Напиши только первое сообщение пользователя (от первого лица):
                     представься вымышленным именем, назови задачу и 1–2 конкретные детали о себе.
                     Не спрашивай у агента, чем он может помочь или что умеет.
                     Не пиши метки этапов в скобках.
@@ -75,20 +88,47 @@ public class UserSimulator {
                 .collect(Collectors.joining(" | "));
 
         int userTurns = (int) history.stream().filter(entry -> "user".equals(entry.role())).count();
+        int nextTurn = userTurns + 1;
 
         return """
-                Прочитай историю выше. Напиши только следующее сообщение пользователя.
+                Напиши только следующую реплику пользователя («Ты» в переписке выше).
                 Уже сказано тобой: %s
                 Номер твоего сообщения: %d
-                Не повторяй дословно уже заданные вопросы.
-                Не спрашивай про возможности агента или «чем можешь помочь».
-                Не пиши метки этапов в скобках — только живое сообщение пользователя.
-                Чередуй советы по своей задаче и проверку памяти агента:
-                - первые сообщения: представься, добавь детали, попроси совет;
-                - дальше: проверяй память — имя, задачу, детали, пересказ, что было несколько сообщений назад;
-                - каждая новая проверка памяти должна касаться другого факта из истории.
-                Не завершай диалог — всегда пиши следующее содержательное сообщение.
-                """.formatted(userMessages, userTurns + 1);
+                %s
+                Обязательно:
+                — только от первого лица («я», «мне», «мой»), ты — пользователь, не агент;
+                — не давай советов и не обращайся к себе по имени на «ты»;
+                — не начинай с «Конечно», «Рекомендую», «Можно попробовать» — это стиль агента;
+                — не повторяй дословно уже сказанное;
+                — не спрашивай про возможности агента;
+                — без меток в скобках;
+                — не завершай диалог.
+                """.formatted(userMessages, nextTurn, turnInstruction(nextTurn));
+    }
+
+    private String turnInstruction(int turn) {
+        if (turn == 2) {
+            return """
+                    Задача этого сообщения: попроси конкретный совет по своей задаче.
+                    Память пока не проверяй.""";
+        }
+        if (turn == 3) {
+            return """
+                    Задача этого сообщения: невзначай проверить, помнит ли агент контекст.
+                    Упомяни от первого лица своё имя, задачу или деталь из первого сообщения
+                    («кстати, для моего [задача]…», «если учесть, что я [деталь]…»).
+                    Запрещено: «как меня зовут?», «что я просил?», «перескажи», «помнишь?»,
+                    обращение к себе по имени на «ты».""";
+        }
+        if (turn % 2 == 0) {
+            return """
+                    Задача этого сообщения: развить свою задачу — новая деталь или совет.
+                    Память не проверяй.""";
+        }
+        return """
+                Задача этого сообщения: снова невзначай проверить память агента.
+                Сошлись на другом факте из истории (имя, задача, деталь, тема 2–3 сообщений назад).
+                Вплети факт в живую реплику, не спрашивай в лоб «помнишь?» / «перескажи» / «как меня зовут?».""";
     }
 
     private SimulatorMessage parseResponse(String raw) {
