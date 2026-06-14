@@ -42,11 +42,11 @@ public class OpenRouterHttpClient {
         this.restTemplate = createRestTemplate();
     }
 
-    public String complete(String model, double temperature, int maxTokens, List<ChatMessage> messages) {
+    public CompletionResult complete(String model, double temperature, int maxTokens, List<ChatMessage> messages) {
         return complete(model, temperature, maxTokens, messages, true);
     }
 
-    public String complete(
+    public CompletionResult complete(
             String model,
             double temperature,
             int maxTokens,
@@ -84,7 +84,7 @@ public class OpenRouterHttpClient {
                         response.getBody());
             }
 
-            return extractContent(response.getBody());
+            return parseCompletion(response.getBody());
         } catch (HttpStatusCodeException exception) {
             if (logExchange) {
                 httpExchangeLogger.logResponse(
@@ -98,7 +98,7 @@ public class OpenRouterHttpClient {
         }
     }
 
-    private String extractContent(String responseBody) {
+    private CompletionResult parseCompletion(String responseBody) {
         if (responseBody == null || responseBody.isBlank()) {
             throw new OpenRouterHttpException(502, "Пустой ответ от OpenRouter.");
         }
@@ -109,7 +109,13 @@ public class OpenRouterHttpClient {
             if (content.isMissingNode() || content.isNull()) {
                 throw new OpenRouterHttpException(502, "OpenRouter вернул ответ без choices[0].message.content.");
             }
-            return content.asText();
+
+            JsonNode usage = root.path("usage");
+            int promptTokens = usage.path("prompt_tokens").asInt(0);
+            int completionTokens = usage.path("completion_tokens").asInt(0);
+            int totalTokens = usage.path("total_tokens").asInt(promptTokens + completionTokens);
+
+            return new CompletionResult(content.asText(), promptTokens, completionTokens, totalTokens);
         } catch (OpenRouterHttpException exception) {
             throw exception;
         } catch (Exception exception) {

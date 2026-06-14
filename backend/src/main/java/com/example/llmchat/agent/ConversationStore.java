@@ -19,6 +19,7 @@ public class ConversationStore {
 
     private final ConversationPersistence persistence;
     private final ConcurrentHashMap<String, List<AgentChatMessage>> sessions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, SessionTokenTotals> tokenTotals = new ConcurrentHashMap<>();
 
     public ConversationStore(ConversationPersistence persistence) {
         this.persistence = persistence;
@@ -28,6 +29,7 @@ public class ConversationStore {
     void loadFromDisk() {
         Map<String, List<AgentChatMessage>> loaded = persistence.load();
         sessions.clear();
+        tokenTotals.clear();
         for (Map.Entry<String, List<AgentChatMessage>> entry : loaded.entrySet()) {
             sessions.put(entry.getKey(), new ArrayList<>(entry.getValue()));
         }
@@ -37,6 +39,7 @@ public class ConversationStore {
     public String createSession() {
         String sessionId = UUID.randomUUID().toString();
         sessions.put(sessionId, new ArrayList<>());
+        tokenTotals.put(sessionId, new SessionTokenTotals());
         persist();
         return sessionId;
     }
@@ -56,17 +59,56 @@ public class ConversationStore {
     public void append(String sessionId, String role, String content) {
         sessions.computeIfAbsent(sessionId, ignored -> new ArrayList<>())
                 .add(new AgentChatMessage(role, content));
+        tokenTotals.computeIfAbsent(sessionId, ignored -> new SessionTokenTotals());
         persist();
+    }
+
+    public void seedHistory(String sessionId, List<AgentChatMessage> messages) {
+        sessions.put(sessionId, new ArrayList<>(messages));
+        tokenTotals.putIfAbsent(sessionId, new SessionTokenTotals());
+        persist();
+    }
+
+    public SessionTokenTotals getTokenTotals(String sessionId) {
+        return tokenTotals.computeIfAbsent(sessionId, ignored -> new SessionTokenTotals());
+    }
+
+    public void addTokenUsage(String sessionId, int promptTokens, int completionTokens) {
+        tokenTotals.computeIfAbsent(sessionId, ignored -> new SessionTokenTotals())
+                .add(promptTokens, completionTokens);
     }
 
     public void clear(String sessionId) {
         if (sessionId != null) {
             sessions.remove(sessionId);
+            tokenTotals.remove(sessionId);
             persist();
         }
     }
 
     private void persist() {
         persistence.save(sessions);
+    }
+
+    public static final class SessionTokenTotals {
+        private int promptTokens;
+        private int completionTokens;
+
+        public void add(int prompt, int completion) {
+            promptTokens += prompt;
+            completionTokens += completion;
+        }
+
+        public int promptTokens() {
+            return promptTokens;
+        }
+
+        public int completionTokens() {
+            return completionTokens;
+        }
+
+        public int totalTokens() {
+            return promptTokens + completionTokens;
+        }
     }
 }

@@ -35,7 +35,7 @@ public class UserSimulator {
 
     public SimulatorMessage generateNextMessage(List<AgentChatMessage> history, String goal) {
         List<OpenRouterHttpClient.ChatMessage> messages = buildMessages(history, goal);
-        String raw = openRouterHttpClient.complete(model, temperature, maxTokens, messages, false);
+        String raw = openRouterHttpClient.complete(model, temperature, maxTokens, messages, false).content();
         return parseResponse(raw);
     }
 
