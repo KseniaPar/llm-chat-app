@@ -10,6 +10,7 @@ app:
     base-url: https://openrouter.ai/api
     model: openai/gpt-4o-mini
   agent:
+    conversation-store-path: data/conversations.json
     system-prompt: |
       Ты — полезный ассистент. Отвечай кратко и по делу.
       Без лишних вступлений, повторов и общих фраз.

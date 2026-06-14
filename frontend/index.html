@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 6 — Первый агент</title>
+  <title>День 7 — Сохранение контекста</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -16,14 +16,13 @@
         <div class="chat-header__avatar" aria-hidden="true">AI</div>
         <div class="chat-header__info">
           <h1>Агент</h1>
-          <p>День 6 — первый агент с памятью диалога</p>
+          <p>День 7 — агент с сохранением контекста между перезапусками</p>
         </div>
         <span id="loading" class="chat-header__status hidden" aria-live="polite">
           <span class="typing-dots"><span></span><span></span><span></span></span>
           печатает
         </span>
-        <button id="auto-btn" class="chat-header__action" type="button">Авто-диалог</button>
-        <button id="stop-btn" class="chat-header__action chat-header__action--stop hidden" type="button">Стоп</button>
+        <button id="new-dialog-btn" class="chat-header__action" type="button">Новый диалог</button>
       </header>
 
       <div id="messages" class="messages" aria-live="polite">
