@@ -4,6 +4,8 @@ const newDialogBtn = document.getElementById('new-dialog-btn');
 const scenarioShortBtn = document.getElementById('scenario-short-btn');
 const scenarioLongBtn = document.getElementById('scenario-long-btn');
 const scenarioOverflowBtn = document.getElementById('scenario-overflow-btn');
+const compareCompressionBtn = document.getElementById('compare-compression-btn');
+const compressionToggleBtn = document.getElementById('compression-toggle-btn');
 const loadingEl = document.getElementById('loading');
 const errorEl = document.getElementById('error');
 const messagesEl = document.getElementById('messages');
@@ -18,16 +20,29 @@ const tokenContext = document.getElementById('token-context');
 const tokenBar = document.getElementById('token-bar');
 const tokenBarFill = document.getElementById('token-bar-fill');
 const tokenWarning = document.getElementById('token-warning');
+const compressionInfo = document.getElementById('compression-info');
 const scenarioTable = document.getElementById('scenario-table');
+const comparePanel = document.getElementById('compare-panel');
+const comparePanelDesc = document.getElementById('compare-panel-desc');
+const compareSummary = document.getElementById('compare-summary');
+const compareRawCard = document.getElementById('compare-raw-card');
+const compareCompressedCard = document.getElementById('compare-compressed-card');
 
-const SCENARIO_BUTTONS = [scenarioShortBtn, scenarioLongBtn, scenarioOverflowBtn];
+const SCENARIO_BUTTONS = [
+  scenarioShortBtn,
+  scenarioLongBtn,
+  scenarioOverflowBtn,
+  compareCompressionBtn,
+];
 
 const CHAR_DELAY_MS = 18;
 const SESSION_STORAGE_KEY = 'llm-chat-session-id';
+const COMPRESSION_STORAGE_KEY = 'llm-chat-compression-enabled';
 const OVERFLOW_USER_PREVIEW = 200;
 
 let activeRequestId = 0;
 let sessionId = null;
+let compressionEnabled = localStorage.getItem(COMPRESSION_STORAGE_KEY) !== 'false';
 let activeScenarioMeta = null;
 let lastScenarioStep = null;
 
@@ -35,9 +50,21 @@ function setControlsDisabled(isDisabled) {
   sendBtn.disabled = isDisabled;
   promptInput.disabled = isDisabled;
   newDialogBtn.disabled = isDisabled;
+  compressionToggleBtn.disabled = isDisabled;
   for (const btn of SCENARIO_BUTTONS) {
     btn.disabled = isDisabled;
   }
+}
+
+function updateCompressionToggleUi() {
+  compressionToggleBtn.textContent = compressionEnabled ? 'Сжатие: вкл' : 'Сжатие: выкл';
+  compressionToggleBtn.classList.toggle('chat-header__action--active', compressionEnabled);
+}
+
+function toggleCompression() {
+  compressionEnabled = !compressionEnabled;
+  localStorage.setItem(COMPRESSION_STORAGE_KEY, String(compressionEnabled));
+  updateCompressionToggleUi();
 }
 
 function setLoading(isLoading) {
@@ -77,6 +104,10 @@ async function restoreSessionFromStorage() {
     sessionId = data.sessionId || savedSessionId;
 
     for (const message of data.messages || []) {
+      if (message.role === 'summary') {
+        appendMessage('summary', `Summary: ${message.content}`);
+        continue;
+      }
       const role = message.role === 'user' ? 'user' : 'assistant';
       appendMessage(role, message.content);
     }
@@ -124,6 +155,9 @@ function getMessageMeta(role) {
   }
   if (role === 'info') {
     return { avatar: 'Σ', label: 'Итог' };
+  }
+  if (role === 'summary') {
+    return { avatar: 'Σ', label: 'Summary' };
   }
   return { avatar: 'AI', label: 'Агент' };
 }
@@ -251,7 +285,7 @@ function updateTokenPanel(tokens, showPanel = true) {
   tokenSession.textContent = formatExactTokens(tokens.sessionTotalTokens);
 
   const promptActual = tokens.promptTokensActual || tokens.requestTokensEstimate || 0;
-  const limit = tokens.modelContextLimit || 1;
+  const limit = tokens.modelContextLimit > 0 ? tokens.modelContextLimit : 128000;
   const usedPercentLabel = formatContextPercent(promptActual, limit);
   const usedPercentBar = contextBarWidth(promptActual, limit);
 
@@ -273,6 +307,20 @@ function updateTokenPanel(tokens, showPanel = true) {
     tokenWarning.textContent = '';
   }
 
+  if (tokens.compressionApplied) {
+    compressionInfo.textContent = `История сжата: ${tokens.messagesSummarized} сообщ. → summary (~${formatExactTokens(tokens.summaryTokens)} токенов)`;
+    compressionInfo.classList.remove('hidden');
+  } else if (tokens.summaryPreview) {
+    compressionInfo.textContent = `В контексте summary (~${formatExactTokens(tokens.summaryTokens)} токенов)`;
+    compressionInfo.classList.remove('hidden');
+  } else if (tokens.compressionEnabled) {
+    compressionInfo.textContent = 'Сжатие включено — summary появится каждые 10 сообщений.';
+    compressionInfo.classList.remove('hidden');
+  } else {
+    compressionInfo.classList.add('hidden');
+    compressionInfo.textContent = '';
+  }
+
   if (showPanel) {
     statsPanel.classList.remove('hidden');
   }
@@ -282,7 +330,7 @@ function tokenPanelFromStep(step, modelContextLimit, failed) {
   if (!step) {
     return null;
   }
-  const limit = modelContextLimit || 1;
+  const limit = modelContextLimit > 0 ? modelContextLimit : 128000;
   const used = step.requestTokens || 0;
   return {
     currentPromptTokens: step.currentPromptTokens,
@@ -309,6 +357,8 @@ function resetTokenPanel() {
   tokenBarFill.style.width = '0%';
   tokenWarning.classList.add('hidden');
   tokenWarning.textContent = '';
+  compressionInfo.classList.add('hidden');
+  compressionInfo.textContent = '';
   statsPanel.classList.add('hidden');
 }
 
@@ -338,6 +388,7 @@ async function startNewDialog() {
 
   clearMessages();
   clearScenarioOutput();
+  clearCompareOutput();
   resetTokenPanel();
 
   if (previousSessionId) {
@@ -371,7 +422,7 @@ async function sendMessage(prompt) {
   setControlsDisabled(true);
   appendMessage('user', prompt);
 
-  const payload = { prompt };
+  const payload = { prompt, compressionEnabled };
   if (sessionId) {
     payload.sessionId = sessionId;
   }
@@ -400,6 +451,13 @@ async function sendMessage(prompt) {
     const assistantReply = data.response || 'Пустой ответ от агента.';
 
     updateTokenPanel(data.tokens);
+
+    if (data.tokens?.compressionApplied) {
+      appendMessage(
+        'info',
+        `История сжата: ${data.tokens.messagesSummarized} сообщений → summary (~${data.tokens.summaryTokens} токенов)`,
+      );
+    }
 
     setLoading(false);
     await appendMessageGradually('assistant', assistantReply);
@@ -613,6 +671,276 @@ async function handleScenarioStreamEvent(event) {
   }
 }
 
+function clearCompareOutput() {
+  comparePanel?.classList.add('hidden');
+  compareSummary?.classList.add('hidden');
+  compareRawCard?.classList.add('hidden');
+  compareCompressedCard?.classList.add('hidden');
+  if (compareSummary) compareSummary.innerHTML = '';
+  if (compareRawCard) compareRawCard.innerHTML = '';
+  if (compareCompressedCard) compareCompressedCard.innerHTML = '';
+}
+
+function renderCompareMetricRow(label, rawValue, compressedValue, deltaValue, formatter = (v) => v) {
+  return `
+    <tr>
+      <td>${label}</td>
+      <td>${formatter(rawValue)}</td>
+      <td>${formatter(compressedValue)}</td>
+      <td>${formatter(deltaValue)}</td>
+    </tr>
+  `;
+}
+
+function renderVariantCard(container, variant, probeTurn) {
+  if (!container || !variant) {
+    return;
+  }
+
+  const lastStep = variant.steps?.[variant.steps.length - 1];
+  const failedClass = variant.failed ? ' compare-card--failed' : '';
+
+  container.className = `compare-card${failedClass}`;
+  container.innerHTML = `
+    <h3>${escapeHtml(variant.title || variant.mode)}</h3>
+    <p class="compare-card__desc">
+      Сжатий: ${variant.compressionEvents?.length || 0}
+      · история на последнем ходу: ~${lastStep?.historyTokens ?? '—'} токенов
+    </p>
+    <div class="compare-table-wrap">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th>Метрика</th>
+            <th>Значение</th>
+            <th>Ход ${probeTurn}</th>
+            <th>Итого</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>История (последний ход)</td>
+            <td colspan="3">~${lastStep?.historyTokens ?? '—'} токенов</td>
+          </tr>
+          <tr>
+            <td>Сессия (токены)</td>
+            <td colspan="3">${formatExactTokens(lastStep?.sessionTotalTokens)}</td>
+          </tr>
+          <tr>
+            <td>Стоимость сессии</td>
+            <td colspan="3">${formatCost(lastStep?.sessionCostUsd)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="compare-live compare-live--success">
+      <h4>Ответ на probe-вопрос (ход ${probeTurn})</h4>
+      <p class="compare-live__text">${escapeHtml(variant.probeAnswer || '—')}</p>
+    </div>
+  `;
+  container.classList.remove('hidden');
+}
+
+function renderCompareSummary(compare) {
+  if (!compareSummary || !compare) {
+    return;
+  }
+
+  compareSummary.className = 'compare-card';
+  compareSummary.innerHTML = `
+    <h3>Итог сравнения</h3>
+    <div class="compare-table-wrap">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th>Метрика</th>
+            <th>Без сжатия</th>
+            <th>Со сжатием</th>
+            <th>Экономия</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${renderCompareMetricRow(
+            'История (ход 20)',
+            compare.raw.finalHistoryTokens,
+            compare.compressed.finalHistoryTokens,
+            compare.historyTokensSaved,
+            formatExactTokens,
+          )}
+          ${renderCompareMetricRow(
+            'Сессия (токены)',
+            compare.raw.sessionTotalTokens,
+            compare.compressed.sessionTotalTokens,
+            compare.sessionTokensSaved,
+            formatExactTokens,
+          )}
+          ${renderCompareMetricRow(
+            'Стоимость сессии',
+            compare.raw.sessionCostUsd,
+            compare.compressed.sessionCostUsd,
+            compare.sessionCostSavedUsd,
+            formatCost,
+          )}
+          <tr>
+            <td>Экономия истории</td>
+            <td colspan="3">${compare.historySavingsPercent.toFixed(1)}%</td>
+          </tr>
+          <tr>
+            <td>Экономия сессии</td>
+            <td colspan="3">${compare.sessionSavingsPercent.toFixed(1)}%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+  compareSummary.classList.remove('hidden');
+}
+
+async function consumeCompressionCompareStream(signal) {
+  const response = await fetch('/api/agent/compression-compare/stream', {
+    signal,
+    headers: { Accept: 'text/event-stream' },
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorResponse(response));
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary = buffer.indexOf('\n\n');
+    while (boundary >= 0) {
+      const chunk = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const event = parseSseEvent(chunk);
+      if (event) {
+        await handleCompressionCompareEvent(event);
+      }
+      boundary = buffer.indexOf('\n\n');
+    }
+  }
+}
+
+async function handleCompressionCompareEvent(event) {
+  switch (event.event) {
+    case 'compare_start':
+      activeScenarioMeta = {
+        id: 'compression',
+        modelContextLimit: event.modelContextLimit,
+      };
+      comparePanel?.classList.remove('hidden');
+      scenarioTablePanel?.classList.add('hidden');
+      if (comparePanelDesc) {
+        comparePanelDesc.textContent = event.description || 'Сравнение двух прогонов одного диалога';
+      }
+      clearCompareOutput();
+      comparePanel?.classList.remove('hidden');
+      setLoading(true);
+      break;
+
+    case 'variant_start':
+      appendMessage('info', `Запуск: ${event.title}`);
+      break;
+
+    case 'user':
+      appendMessage('user', event.content);
+      break;
+
+    case 'compressed':
+      appendMessage(
+        'info',
+        `Сжатие на ходу ${event.turn}: ${event.messagesSummarized} сообщ. → summary (~${event.summaryTokens} токенов)`,
+      );
+      break;
+
+    case 'turn':
+      await appendMessageGradually('assistant', event.content || '');
+      if (event.step) {
+        updateTokenPanel(
+          tokenPanelFromStep(event.step, activeScenarioMeta?.modelContextLimit, false),
+          true,
+        );
+      }
+      break;
+
+    case 'variant_done':
+      if (event.variantResult?.mode === 'raw') {
+        renderVariantCard(compareRawCard, event.variantResult, event.variantResult.steps?.length ? 15 : 15);
+      } else if (event.variantResult?.mode === 'compressed') {
+        renderVariantCard(compareCompressedCard, event.variantResult, 15);
+      }
+      break;
+
+    case 'compare_done':
+      renderCompareSummary(event.compareResult);
+      renderVariantCard(compareRawCard, event.compareResult?.raw, event.compareResult?.probeTurn || 15);
+      renderVariantCard(
+        compareCompressedCard,
+        event.compareResult?.compressed,
+        event.compareResult?.probeTurn || 15,
+      );
+      setLoading(false);
+      break;
+
+    default:
+      break;
+  }
+}
+
+async function loadCompressionCompare() {
+  clearError();
+  activeRequestId += 1;
+  const requestId = activeRequestId;
+  sessionId = null;
+  persistSessionId(null);
+  activeScenarioMeta = null;
+  lastScenarioStep = null;
+
+  clearMessages();
+  clearScenarioOutput();
+  clearCompareOutput();
+  resetTokenPanel();
+
+  setControlsDisabled(true);
+  setLoading(true);
+  statsPanel.classList.remove('hidden');
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30 * 60 * 1000);
+
+  try {
+    await consumeCompressionCompareStream(controller.signal);
+    if (requestId === activeRequestId) {
+      clearError();
+    }
+  } catch (error) {
+    if (requestId !== activeRequestId) {
+      return;
+    }
+    showError(
+      error.name === 'AbortError'
+        ? 'Сравнение прервано по таймауту. Попробуйте снова.'
+        : error.message,
+    );
+  } finally {
+    clearTimeout(timeoutId);
+    if (requestId === activeRequestId) {
+      setLoading(false);
+      setControlsDisabled(false);
+    }
+  }
+}
+
 async function loadTokenScenario(scenario) {
   clearError();
   activeRequestId += 1;
@@ -624,6 +952,7 @@ async function loadTokenScenario(scenario) {
 
   clearMessages();
   clearScenarioOutput();
+  clearCompareOutput();
   resetTokenPanel();
 
   setControlsDisabled(true);
@@ -658,9 +987,11 @@ async function loadTokenScenario(scenario) {
 
 sendBtn.addEventListener('click', sendPrompt);
 newDialogBtn.addEventListener('click', startNewDialog);
+compressionToggleBtn.addEventListener('click', toggleCompression);
 scenarioShortBtn.addEventListener('click', () => loadTokenScenario('short'));
 scenarioLongBtn.addEventListener('click', () => loadTokenScenario('long'));
 scenarioOverflowBtn.addEventListener('click', () => loadTokenScenario('overflow'));
+compareCompressionBtn.addEventListener('click', loadCompressionCompare);
 
 promptInput.addEventListener('input', resizeInput);
 
@@ -672,6 +1003,7 @@ promptInput.addEventListener('keydown', (event) => {
 });
 
 resizeInput();
+updateCompressionToggleUi();
 restoreSessionFromStorage().finally(() => {
   promptInput.focus();
 });

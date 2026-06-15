@@ -18,7 +18,7 @@ public class ConversationStore {
     private static final Logger log = LoggerFactory.getLogger(ConversationStore.class);
 
     private final ConversationPersistence persistence;
-    private final ConcurrentHashMap<String, List<AgentChatMessage>> sessions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, SessionState> sessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, SessionTokenTotals> tokenTotals = new ConcurrentHashMap<>();
 
     public ConversationStore(ConversationPersistence persistence) {
@@ -27,18 +27,16 @@ public class ConversationStore {
 
     @PostConstruct
     void loadFromDisk() {
-        Map<String, List<AgentChatMessage>> loaded = persistence.load();
+        Map<String, SessionState> loaded = persistence.load();
         sessions.clear();
         tokenTotals.clear();
-        for (Map.Entry<String, List<AgentChatMessage>> entry : loaded.entrySet()) {
-            sessions.put(entry.getKey(), new ArrayList<>(entry.getValue()));
-        }
+        sessions.putAll(loaded);
         log.info("Загружено сессий диалога: {}", sessions.size());
     }
 
     public String createSession() {
         String sessionId = UUID.randomUUID().toString();
-        sessions.put(sessionId, new ArrayList<>());
+        sessions.put(sessionId, new SessionState());
         tokenTotals.put(sessionId, new SessionTokenTotals());
         persist();
         return sessionId;
@@ -49,22 +47,79 @@ public class ConversationStore {
     }
 
     public List<AgentChatMessage> getHistory(String sessionId) {
-        List<AgentChatMessage> history = sessions.get(sessionId);
-        if (history == null) {
+        return getEffectiveHistory(sessionId);
+    }
+
+    public List<AgentChatMessage> getEffectiveHistory(String sessionId) {
+        SessionState state = sessions.get(sessionId);
+        if (state == null || state.getMessages() == null) {
             return List.of();
         }
-        return List.copyOf(history);
+        return List.copyOf(state.getMessages());
+    }
+
+    public List<AgentChatMessage> getMessages(String sessionId) {
+        return getEffectiveHistory(sessionId);
+    }
+
+    public String getSummary(String sessionId) {
+        SessionState state = sessions.get(sessionId);
+        if (state == null) {
+            return null;
+        }
+        return state.getSummary();
+    }
+
+    public int getTotalMessageCount(String sessionId) {
+        SessionState state = sessions.get(sessionId);
+        if (state == null) {
+            return 0;
+        }
+        return state.getTotalMessageCount();
+    }
+
+    public List<AgentChatMessage> getFullHistoryForDisplay(String sessionId) {
+        SessionState state = sessions.get(sessionId);
+        if (state == null) {
+            return List.of();
+        }
+
+        List<AgentChatMessage> display = new ArrayList<>();
+        if (state.getSummary() != null && !state.getSummary().isBlank()) {
+            display.add(new AgentChatMessage("summary", state.getSummary()));
+        }
+        if (state.getMessages() != null) {
+            display.addAll(state.getMessages());
+        }
+        return List.copyOf(display);
     }
 
     public void append(String sessionId, String role, String content) {
-        sessions.computeIfAbsent(sessionId, ignored -> new ArrayList<>())
-                .add(new AgentChatMessage(role, content));
+        SessionState state = sessions.computeIfAbsent(sessionId, ignored -> new SessionState());
+        if (state.getMessages() == null) {
+            state.setMessages(new ArrayList<>());
+        }
+        state.getMessages().add(new AgentChatMessage(role, content));
+        state.setTotalMessageCount(state.getTotalMessageCount() + 1);
         tokenTotals.computeIfAbsent(sessionId, ignored -> new SessionTokenTotals());
         persist();
     }
 
+    public void applyCompression(String sessionId, String summary, List<AgentChatMessage> keptMessages) {
+        SessionState state = sessions.get(sessionId);
+        if (state == null) {
+            return;
+        }
+        state.setSummary(summary);
+        state.setMessages(new ArrayList<>(keptMessages));
+        persist();
+    }
+
     public void seedHistory(String sessionId, List<AgentChatMessage> messages) {
-        sessions.put(sessionId, new ArrayList<>(messages));
+        SessionState state = new SessionState();
+        state.setMessages(new ArrayList<>(messages));
+        state.setTotalMessageCount(messages.size());
+        sessions.put(sessionId, state);
         tokenTotals.putIfAbsent(sessionId, new SessionTokenTotals());
         persist();
     }

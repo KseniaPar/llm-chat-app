@@ -15,5 +15,11 @@ public record TokenStats(
         int modelContextLimit,
         int contextRemaining,
         boolean nearContextLimit,
-        boolean contextOverflow) {
+        boolean contextOverflow,
+        boolean compressionEnabled,
+        boolean compressionApplied,
+        int summaryTokens,
+        int messagesInContext,
+        int messagesSummarized,
+        String summaryPreview) {
 }
