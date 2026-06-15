@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class ChatAgent {
@@ -20,6 +21,9 @@ public class ChatAgent {
     private final HttpExchangeLogger httpExchangeLogger;
     private final TokenCounter tokenCounter;
     private final ContextCompressionService contextCompressionService;
+    private final ContextStrategyService contextStrategyService;
+    private final FactsMemoryService factsMemoryService;
+    private final BranchingService branchingService;
     private final String model;
     private final String systemPrompt;
     private final double temperature;
@@ -32,6 +36,9 @@ public class ChatAgent {
             HttpExchangeLogger httpExchangeLogger,
             TokenCounter tokenCounter,
             ContextCompressionService contextCompressionService,
+            ContextStrategyService contextStrategyService,
+            FactsMemoryService factsMemoryService,
+            BranchingService branchingService,
             @Value("${app.openrouter.model}") String model,
             @Value("${app.agent.system-prompt}") String systemPrompt,
             @Value("${app.agent.temperature}") double temperature,
@@ -42,6 +49,9 @@ public class ChatAgent {
         this.httpExchangeLogger = httpExchangeLogger;
         this.tokenCounter = tokenCounter;
         this.contextCompressionService = contextCompressionService;
+        this.contextStrategyService = contextStrategyService;
+        this.factsMemoryService = factsMemoryService;
+        this.branchingService = branchingService;
         this.model = model;
         this.systemPrompt = systemPrompt;
         this.temperature = temperature;
@@ -55,32 +65,64 @@ public class ChatAgent {
             throw new IllegalArgumentException("Промпт не может быть пустым.");
         }
 
-        boolean compressionEnabled = request.compressionEnabled() != null
-                ? request.compressionEnabled()
-                : defaultCompressionEnabled;
+        ContextStrategy strategy = ContextStrategy.fromString(request.contextStrategy());
+        boolean useDay10Strategy = strategy != null;
 
-        String sessionId = resolveSessionId(request.sessionId());
-        String summary = conversationStore.getSummary(sessionId);
-        List<AgentChatMessage> history = conversationStore.getEffectiveHistory(sessionId);
-        List<OpenRouterHttpClient.ChatMessage> messages = buildMessages(prompt, summary, history);
+        boolean compressionEnabled = !useDay10Strategy && (request.compressionEnabled() != null
+                ? request.compressionEnabled()
+                : defaultCompressionEnabled);
+
+        String sessionId = resolveSessionId(request.sessionId(), strategy);
+        contextStrategyService.ensureStrategy(sessionId, strategy);
+
+        if (strategy == ContextStrategy.BRANCHING && request.branchId() != null && !request.branchId().isBlank()) {
+            branchingService.switchBranch(sessionId, request.branchId());
+        }
+
+        String activeSessionId = strategy == ContextStrategy.BRANCHING
+                ? branchingService.resolveActiveSessionId(sessionId)
+                : sessionId;
+
+        String summary = useDay10Strategy ? null : conversationStore.getSummary(sessionId);
+        ContextStrategyService.PreparedContext preparedContext =
+                contextStrategyService.prepareContext(activeSessionId, strategy);
+        List<AgentChatMessage> history = preparedContext.messages();
+
+        List<OpenRouterHttpClient.ChatMessage> messages = buildMessages(
+                prompt, summary, history, preparedContext.factsBlock(), useDay10Strategy);
 
         int currentPromptTokens = tokenCounter.estimateTextTokens(prompt);
-        int historyTokens = estimateHistoryTokens(summary, history);
+        int historyTokens = estimateHistoryTokens(summary, history, preparedContext.factsBlock(), useDay10Strategy);
         int requestTokensEstimate = tokenCounter.estimateMessagesTokens(messages);
         int contextLimit = tokenCounter.contextWindow();
-        int messagesInContext = history.size() + (summary != null && !summary.isBlank() ? 1 : 0);
+        int messagesInContext = preparedContext.messagesInContext()
+                + (preparedContext.factsBlock() != null ? 1 : 0)
+                + (!useDay10Strategy && summary != null && !summary.isBlank() ? 1 : 0);
 
         List<String> logs = new ArrayList<>();
-        logs.add("Сжатие истории: " + (compressionEnabled ? "включено" : "выключено"));
-        if (summary != null && !summary.isBlank()) {
-            logs.add("В контексте есть summary (~" + contextCompressionService.estimateSummaryTokens(summary) + " токенов)");
+        if (useDay10Strategy) {
+            logs.add("Стратегия контекста: " + strategy.name());
+            logs.add("Окно: " + contextStrategyService.windowSize() + " сообщений");
+            if (preparedContext.messagesDropped() > 0) {
+                logs.add("Отброшено из контекста: " + preparedContext.messagesDropped() + " сообщений");
+            }
+            if (strategy == ContextStrategy.STICKY_FACTS) {
+                Map<String, String> facts = conversationStore.getFacts(activeSessionId);
+                logs.add("Фактов в памяти: " + facts.size());
+            }
+        } else {
+            logs.add("Сжатие истории: " + (compressionEnabled ? "включено" : "выключено"));
+            if (summary != null && !summary.isBlank()) {
+                logs.add("В контексте есть summary (~"
+                        + contextCompressionService.estimateSummaryTokens(summary) + " токенов)");
+            }
         }
         logs.add("Токены — текущий запрос: ~" + currentPromptTokens);
         logs.add("Токены — история диалога: ~" + historyTokens + " (" + messagesInContext + " блоков)");
         logs.add("Токены — весь промпт (system + история + запрос): ~" + requestTokensEstimate
                 + " / лимит " + contextLimit);
 
-        httpExchangeLogger.logAgentContext(sessionId, history.size(), prompt);
+        httpExchangeLogger.logAgentContext(activeSessionId, history.size(), prompt);
         httpExchangeLogger.logTokenEstimate(currentPromptTokens, historyTokens, requestTokensEstimate, contextLimit);
 
         boolean estimatedOverflow = tokenCounter.exceedsContextWindow(requestTokensEstimate);
@@ -101,20 +143,25 @@ public class ChatAgent {
                 ? completion.totalTokens()
                 : promptTokensActual + responseTokens;
 
-        conversationStore.append(sessionId, "user", prompt);
-        conversationStore.append(sessionId, "assistant", answer);
-        conversationStore.addTokenUsage(sessionId, promptTokensActual, responseTokens);
+        conversationStore.append(activeSessionId, "user", prompt);
+        Map<String, String> updatedFacts = contextStrategyService.afterUserMessage(activeSessionId, strategy, prompt);
+        conversationStore.append(activeSessionId, "assistant", answer);
+        contextStrategyService.afterAssistantMessage(activeSessionId, strategy);
+        conversationStore.addTokenUsage(activeSessionId, promptTokensActual, responseTokens);
 
         ContextCompressionService.CompressionResult compressionResult =
-                contextCompressionService.compressIfNeeded(sessionId, compressionEnabled);
-        if (compressionResult.applied()) {
-            logs.add(String.format(
-                    "Сжатие: %d сообщений → summary (~%d токенов)",
-                    compressionResult.messagesSummarized(),
-                    compressionResult.summaryTokens()));
+                ContextCompressionService.CompressionResult.notApplied();
+        if (!useDay10Strategy) {
+            compressionResult = contextCompressionService.compressIfNeeded(sessionId, compressionEnabled);
+            if (compressionResult.applied()) {
+                logs.add(String.format(
+                        "Сжатие: %d сообщений → summary (~%d токенов)",
+                        compressionResult.messagesSummarized(),
+                        compressionResult.summaryTokens()));
+            }
         }
 
-        ConversationStore.SessionTokenTotals sessionTotals = conversationStore.getTokenTotals(sessionId);
+        ConversationStore.SessionTokenTotals sessionTotals = conversationStore.getTokenTotals(activeSessionId);
         double requestCostUsd = tokenCounter.calculateCostUsd(promptTokensActual, responseTokens);
         double sessionCostUsd = tokenCounter.calculateCostUsd(
                 sessionTotals.promptTokens(),
@@ -131,6 +178,11 @@ public class ChatAgent {
                 sessionCostUsd));
 
         httpExchangeLogger.logTokenUsage(promptTokensActual, responseTokens, totalTokensActual, requestCostUsd);
+
+        Map<String, String> factsForStats = updatedFacts.isEmpty()
+                ? conversationStore.getFacts(activeSessionId)
+                : updatedFacts;
+        int factsTokens = factsMemoryService.estimateFactsTokens(factsForStats);
 
         TokenStats tokenStats = new TokenStats(
                 currentPromptTokens,
@@ -153,7 +205,12 @@ public class ChatAgent {
                 compressionResult.summaryTokens(),
                 messagesInContext,
                 compressionResult.messagesSummarized(),
-                compressionResult.summaryPreview());
+                compressionResult.summaryPreview(),
+                strategy != null ? strategy.name() : null,
+                factsTokens,
+                factsForStats.size(),
+                contextStrategyService.windowSize(),
+                preparedContext.messagesInStore());
 
         return new AgentResponse(answer, sessionId, List.copyOf(logs), tokenStats);
     }
@@ -162,15 +219,25 @@ public class ChatAgent {
         conversationStore.clear(sessionId);
     }
 
-    private String resolveSessionId(String sessionId) {
+    private String resolveSessionId(String sessionId, ContextStrategy strategy) {
         if (sessionId == null || sessionId.isBlank() || !conversationStore.hasSession(sessionId)) {
-            return conversationStore.createSession();
+            return conversationStore.createSession(strategy);
         }
         return sessionId;
     }
 
-    private int estimateHistoryTokens(String summary, List<AgentChatMessage> history) {
-        int total = contextCompressionService.estimateSummaryTokens(summary);
+    private int estimateHistoryTokens(
+            String summary,
+            List<AgentChatMessage> history,
+            String factsBlock,
+            boolean useDay10Strategy) {
+        int total = 0;
+        if (!useDay10Strategy) {
+            total += contextCompressionService.estimateSummaryTokens(summary);
+        }
+        if (factsBlock != null && !factsBlock.isBlank()) {
+            total += tokenCounter.estimateMessageTokens("system", factsBlock);
+        }
         List<OpenRouterHttpClient.ChatMessage> historyMessages = history.stream()
                 .map(entry -> new OpenRouterHttpClient.ChatMessage(entry.role(), entry.content()))
                 .toList();
@@ -181,13 +248,21 @@ public class ChatAgent {
     List<OpenRouterHttpClient.ChatMessage> buildMessages(
             String prompt,
             String summary,
-            List<AgentChatMessage> history) {
+            List<AgentChatMessage> history,
+            String factsBlock,
+            boolean useDay10Strategy) {
         List<OpenRouterHttpClient.ChatMessage> messages = new ArrayList<>();
         messages.add(new OpenRouterHttpClient.ChatMessage("system", systemPrompt));
 
-        String summaryForContext = contextCompressionService.formatSummaryForContext(summary);
-        if (summaryForContext != null) {
-            messages.add(new OpenRouterHttpClient.ChatMessage("system", summaryForContext));
+        if (!useDay10Strategy) {
+            String summaryForContext = contextCompressionService.formatSummaryForContext(summary);
+            if (summaryForContext != null) {
+                messages.add(new OpenRouterHttpClient.ChatMessage("system", summaryForContext));
+            }
+        }
+
+        if (factsBlock != null && !factsBlock.isBlank()) {
+            messages.add(new OpenRouterHttpClient.ChatMessage("system", factsBlock));
         }
 
         for (AgentChatMessage entry : history) {

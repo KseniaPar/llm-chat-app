@@ -21,5 +21,10 @@ public record TokenStats(
         int summaryTokens,
         int messagesInContext,
         int messagesSummarized,
-        String summaryPreview) {
+        String summaryPreview,
+        String contextStrategy,
+        int factsTokens,
+        int factsCount,
+        int windowSize,
+        int messagesInStore) {
 }

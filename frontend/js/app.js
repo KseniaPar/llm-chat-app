@@ -5,7 +5,19 @@ const scenarioShortBtn = document.getElementById('scenario-short-btn');
 const scenarioLongBtn = document.getElementById('scenario-long-btn');
 const scenarioOverflowBtn = document.getElementById('scenario-overflow-btn');
 const compareCompressionBtn = document.getElementById('compare-compression-btn');
+const compareStrategiesBtn = document.getElementById('compare-strategies-btn');
 const compressionToggleBtn = document.getElementById('compression-toggle-btn');
+const strategyWindowBtn = document.getElementById('strategy-window-btn');
+const strategyFactsBtn = document.getElementById('strategy-facts-btn');
+const strategyBranchBtn = document.getElementById('strategy-branch-btn');
+const branchControls = document.getElementById('branch-controls');
+const branchCheckpointBtn = document.getElementById('branch-checkpoint-btn');
+const branchCreateBtn = document.getElementById('branch-create-btn');
+const branchTabs = document.getElementById('branch-tabs');
+const strategyInfo = document.getElementById('strategy-info');
+const factsPanel = document.getElementById('facts-panel');
+const factsTable = document.getElementById('facts-table');
+const comparePanelTitle = document.getElementById('compare-panel-title');
 const loadingEl = document.getElementById('loading');
 const errorEl = document.getElementById('error');
 const messagesEl = document.getElementById('messages');
@@ -27,38 +39,215 @@ const comparePanelDesc = document.getElementById('compare-panel-desc');
 const compareSummary = document.getElementById('compare-summary');
 const compareRawCard = document.getElementById('compare-raw-card');
 const compareCompressedCard = document.getElementById('compare-compressed-card');
+const compareStrategySliding = document.getElementById('compare-strategy-sliding');
+const compareStrategyFacts = document.getElementById('compare-strategy-facts');
+const compareStrategyBranching = document.getElementById('compare-strategy-branching');
 
 const SCENARIO_BUTTONS = [
   scenarioShortBtn,
   scenarioLongBtn,
   scenarioOverflowBtn,
   compareCompressionBtn,
+  compareStrategiesBtn,
 ];
+
+const STRATEGY_BUTTONS = [strategyWindowBtn, strategyFactsBtn, strategyBranchBtn];
+
+const STRATEGY_LABELS = {
+  SLIDING_WINDOW: 'Sliding Window',
+  STICKY_FACTS: 'Sticky Facts',
+  BRANCHING: 'Branching',
+};
 
 const CHAR_DELAY_MS = 18;
 const SESSION_STORAGE_KEY = 'llm-chat-session-id';
 const COMPRESSION_STORAGE_KEY = 'llm-chat-compression-enabled';
+const STRATEGY_STORAGE_KEY = 'llm-chat-context-strategy';
 const OVERFLOW_USER_PREVIEW = 200;
 
 let activeRequestId = 0;
 let sessionId = null;
 let compressionEnabled = localStorage.getItem(COMPRESSION_STORAGE_KEY) !== 'false';
+let contextStrategy = localStorage.getItem(STRATEGY_STORAGE_KEY) || 'SLIDING_WINDOW';
+let activeBranchId = null;
+let branches = [];
+let forkMessageIndex = -1;
 let activeScenarioMeta = null;
 let lastScenarioStep = null;
+
+function isDay10Strategy() {
+  return Boolean(contextStrategy);
+}
 
 function setControlsDisabled(isDisabled) {
   sendBtn.disabled = isDisabled;
   promptInput.disabled = isDisabled;
   newDialogBtn.disabled = isDisabled;
-  compressionToggleBtn.disabled = isDisabled;
+  compressionToggleBtn.disabled = isDisabled || isDay10Strategy();
   for (const btn of SCENARIO_BUTTONS) {
     btn.disabled = isDisabled;
+  }
+  for (const btn of STRATEGY_BUTTONS) {
+    if (btn) btn.disabled = isDisabled;
+  }
+  if (branchCheckpointBtn) branchCheckpointBtn.disabled = isDisabled || contextStrategy !== 'BRANCHING';
+  if (branchCreateBtn) {
+    branchCreateBtn.disabled = isDisabled || contextStrategy !== 'BRANCHING' || forkMessageIndex < 0 || branches.length > 0;
   }
 }
 
 function updateCompressionToggleUi() {
   compressionToggleBtn.textContent = compressionEnabled ? 'Сжатие: вкл' : 'Сжатие: выкл';
   compressionToggleBtn.classList.toggle('chat-header__action--active', compressionEnabled);
+  compressionToggleBtn.classList.toggle('hidden', isDay10Strategy());
+}
+
+function updateStrategyUi() {
+  for (const btn of STRATEGY_BUTTONS) {
+    if (!btn) continue;
+    btn.classList.toggle('chat-header__action--active', btn.dataset.strategy === contextStrategy);
+  }
+  branchControls?.classList.toggle('hidden', contextStrategy !== 'BRANCHING');
+  factsPanel?.classList.toggle('hidden', contextStrategy !== 'STICKY_FACTS');
+  updateCompressionToggleUi();
+  renderBranchTabs();
+}
+
+function selectStrategy(strategy) {
+  contextStrategy = strategy;
+  localStorage.setItem(STRATEGY_STORAGE_KEY, strategy);
+  activeBranchId = null;
+  branches = [];
+  forkMessageIndex = -1;
+  updateStrategyUi();
+}
+
+function renderFactsPanel(facts) {
+  if (!factsTable || contextStrategy !== 'STICKY_FACTS') {
+    return;
+  }
+  const entries = Object.entries(facts || {});
+  if (entries.length === 0) {
+    factsTable.innerHTML = '<p class="facts-panel__empty">Факты появятся после первого сообщения</p>';
+    factsPanel?.classList.remove('hidden');
+    return;
+  }
+  factsTable.innerHTML = entries
+    .map(
+      ([key, value]) =>
+        `<div class="facts-panel__row"><span class="facts-panel__key">${escapeHtml(key)}</span><span class="facts-panel__value">${escapeHtml(value)}</span></div>`,
+    )
+    .join('');
+  factsPanel?.classList.remove('hidden');
+}
+
+function renderBranchTabs() {
+  if (!branchTabs) return;
+  if (contextStrategy !== 'BRANCHING' || branches.length === 0) {
+    branchTabs.innerHTML = '';
+    return;
+  }
+  branchTabs.innerHTML = branches
+    .map(
+      (branch) =>
+        `<button type="button" class="branch-tabs__btn${branch.branchId === activeBranchId ? ' branch-tabs__btn--active' : ''}" data-branch-id="${escapeHtml(branch.branchId)}">${escapeHtml(branch.label)}</button>`,
+    )
+    .join('');
+  branchTabs.querySelectorAll('.branch-tabs__btn').forEach((btn) => {
+    btn.addEventListener('click', () => switchBranch(btn.dataset.branchId));
+  });
+}
+
+async function reloadHistory() {
+  if (!sessionId) return;
+  try {
+    const response = await fetch(`/api/agent/history?sessionId=${encodeURIComponent(sessionId)}`);
+    if (!response.ok) return;
+    const data = await response.json();
+    clearMessages();
+    branches = data.branches || [];
+    activeBranchId = data.activeBranchId || activeBranchId;
+    forkMessageIndex = data.forkMessageIndex ?? forkMessageIndex;
+    for (const message of data.messages || []) {
+      if (message.role === 'summary') {
+        appendMessage('summary', `Summary: ${message.content}`);
+        continue;
+      }
+      if (message.role === 'facts') {
+        appendMessage('facts', message.content);
+        continue;
+      }
+      const role = message.role === 'user' ? 'user' : 'assistant';
+      appendMessage(role, message.content);
+    }
+    renderFactsPanel(data.facts);
+    renderBranchTabs();
+    if (branchCreateBtn) {
+      branchCreateBtn.disabled = forkMessageIndex < 0 || branches.length > 0;
+    }
+  } catch {
+    // ignore
+  }
+}
+
+async function createBranchCheckpoint() {
+  if (!sessionId) {
+    showError('Сначала начните диалог.');
+    return;
+  }
+  clearError();
+  try {
+    const response = await fetch('/api/agent/branch/checkpoint', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+    });
+    if (!response.ok) throw new Error(await parseErrorResponse(response));
+    const data = await response.json();
+    forkMessageIndex = data.forkMessageIndex;
+    appendMessage('info', `Checkpoint создан на сообщении ${forkMessageIndex}`);
+    if (branchCreateBtn) branchCreateBtn.disabled = false;
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function createBranches() {
+  if (!sessionId) return;
+  clearError();
+  try {
+    const response = await fetch('/api/agent/branch/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+    });
+    if (!response.ok) throw new Error(await parseErrorResponse(response));
+    const data = await response.json();
+    branches = data.branches || [];
+    activeBranchId = data.activeBranchId;
+    appendMessage('info', `Созданы ветки: ${branches.map((b) => b.label).join(', ')}`);
+    await reloadHistory();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function switchBranch(branchId) {
+  if (!sessionId || !branchId) return;
+  clearError();
+  try {
+    const response = await fetch('/api/agent/branch/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, branchId }),
+    });
+    if (!response.ok) throw new Error(await parseErrorResponse(response));
+    activeBranchId = branchId;
+    appendMessage('info', `Переключено на ветку: ${branches.find((b) => b.branchId === branchId)?.label || branchId}`);
+    await reloadHistory();
+  } catch (error) {
+    showError(error.message);
+  }
 }
 
 function toggleCompression() {
@@ -102,15 +291,25 @@ async function restoreSessionFromStorage() {
 
     const data = await response.json();
     sessionId = data.sessionId || savedSessionId;
+    contextStrategy = data.contextStrategy || contextStrategy;
+    branches = data.branches || [];
+    activeBranchId = data.activeBranchId || null;
+    forkMessageIndex = data.forkMessageIndex ?? -1;
 
     for (const message of data.messages || []) {
       if (message.role === 'summary') {
         appendMessage('summary', `Summary: ${message.content}`);
         continue;
       }
+      if (message.role === 'facts') {
+        appendMessage('facts', message.content);
+        continue;
+      }
       const role = message.role === 'user' ? 'user' : 'assistant';
       appendMessage(role, message.content);
     }
+    renderFactsPanel(data.facts);
+    updateStrategyUi();
   } catch {
     sessionId = savedSessionId;
   }
@@ -158,6 +357,9 @@ function getMessageMeta(role) {
   }
   if (role === 'summary') {
     return { avatar: 'Σ', label: 'Summary' };
+  }
+  if (role === 'facts') {
+    return { avatar: 'F', label: 'Facts' };
   }
   return { avatar: 'AI', label: 'Агент' };
 }
@@ -321,6 +523,17 @@ function updateTokenPanel(tokens, showPanel = true) {
     compressionInfo.textContent = '';
   }
 
+  if (tokens.contextStrategy) {
+    strategyInfo.textContent = `Стратегия: ${STRATEGY_LABELS[tokens.contextStrategy] || tokens.contextStrategy} · окно ${tokens.windowSize || '—'} · в контексте ${tokens.messagesInContext || '—'} сообщ. · в store ${tokens.messagesInStore || '—'}`;
+    if (tokens.contextStrategy === 'STICKY_FACTS') {
+      strategyInfo.textContent += ` · фактов: ${tokens.factsCount || 0} (~${formatExactTokens(tokens.factsTokens)} ток.)`;
+    }
+    strategyInfo.classList.remove('hidden');
+  } else {
+    strategyInfo.classList.add('hidden');
+    strategyInfo.textContent = '';
+  }
+
   if (showPanel) {
     statsPanel.classList.remove('hidden');
   }
@@ -359,6 +572,10 @@ function resetTokenPanel() {
   tokenWarning.textContent = '';
   compressionInfo.classList.add('hidden');
   compressionInfo.textContent = '';
+  strategyInfo.classList.add('hidden');
+  strategyInfo.textContent = '';
+  factsPanel?.classList.add('hidden');
+  if (factsTable) factsTable.innerHTML = '';
   statsPanel.classList.add('hidden');
 }
 
@@ -385,6 +602,9 @@ async function startNewDialog() {
   persistSessionId(null);
   activeScenarioMeta = null;
   lastScenarioStep = null;
+  activeBranchId = null;
+  branches = [];
+  forkMessageIndex = -1;
 
   clearMessages();
   clearScenarioOutput();
@@ -422,9 +642,16 @@ async function sendMessage(prompt) {
   setControlsDisabled(true);
   appendMessage('user', prompt);
 
-  const payload = { prompt, compressionEnabled };
+  const payload = {
+    prompt,
+    compressionEnabled: isDay10Strategy() ? false : compressionEnabled,
+    contextStrategy,
+  };
   if (sessionId) {
     payload.sessionId = sessionId;
+  }
+  if (contextStrategy === 'BRANCHING' && activeBranchId) {
+    payload.branchId = activeBranchId;
   }
 
   try {
@@ -451,6 +678,18 @@ async function sendMessage(prompt) {
     const assistantReply = data.response || 'Пустой ответ от агента.';
 
     updateTokenPanel(data.tokens);
+
+    if (data.tokens?.contextStrategy === 'STICKY_FACTS' && sessionId) {
+      try {
+        const histResponse = await fetch(`/api/agent/history?sessionId=${encodeURIComponent(sessionId)}`);
+        if (histResponse.ok) {
+          const histData = await histResponse.json();
+          renderFactsPanel(histData.facts);
+        }
+      } catch {
+        // facts panel optional
+      }
+    }
 
     if (data.tokens?.compressionApplied) {
       appendMessage(
@@ -676,9 +915,16 @@ function clearCompareOutput() {
   compareSummary?.classList.add('hidden');
   compareRawCard?.classList.add('hidden');
   compareCompressedCard?.classList.add('hidden');
+  compareStrategySliding?.classList.add('hidden');
+  compareStrategyFacts?.classList.add('hidden');
+  compareStrategyBranching?.classList.add('hidden');
+  comparePanel?.querySelector('.compare-panel__content')?.classList.remove('compare-panel__content--strategies');
   if (compareSummary) compareSummary.innerHTML = '';
   if (compareRawCard) compareRawCard.innerHTML = '';
   if (compareCompressedCard) compareCompressedCard.innerHTML = '';
+  if (compareStrategySliding) compareStrategySliding.innerHTML = '';
+  if (compareStrategyFacts) compareStrategyFacts.innerHTML = '';
+  if (compareStrategyBranching) compareStrategyBranching.innerHTML = '';
 }
 
 function renderCompareMetricRow(label, rawValue, compressedValue, deltaValue, formatter = (v) => v) {
@@ -796,6 +1042,98 @@ function renderCompareSummary(compare) {
   compareSummary.classList.remove('hidden');
 }
 
+function renderStrategyVariantCard(container, variant, probeTurn) {
+  if (!container || !variant) {
+    return;
+  }
+
+  const lastStep = variant.steps?.[variant.steps.length - 1];
+  const failedClass = variant.failed ? ' compare-card--failed' : '';
+
+  container.className = `compare-card${failedClass}`;
+  container.innerHTML = `
+    <h3>${escapeHtml(variant.title || variant.mode)}</h3>
+    <p class="compare-card__desc">
+      Фактов: ${variant.factsCount ?? 0}
+      · история на последнем ходу: ~${lastStep?.historyTokens ?? '—'} токенов
+    </p>
+    <div class="compare-table-wrap">
+      <table class="compare-table">
+        <tbody>
+          <tr>
+            <td>Сессия (токены)</td>
+            <td>${formatExactTokens(lastStep?.sessionTotalTokens)}</td>
+          </tr>
+          <tr>
+            <td>Стоимость сессии</td>
+            <td>${formatCost(lastStep?.sessionCostUsd)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="compare-live compare-live--success">
+      <h4>Probe (ход ${probeTurn})</h4>
+      <p class="compare-live__text">${escapeHtml(variant.probeAnswer || '—')}</p>
+    </div>
+    <div class="compare-live">
+      <h4>Финальный ответ</h4>
+      <p class="compare-live__text">${escapeHtml(variant.finalAnswer || '—')}</p>
+    </div>
+  `;
+  container.classList.remove('hidden');
+}
+
+function renderStrategyCompareSummary(compare) {
+  if (!compareSummary || !compare?.variants) {
+    return;
+  }
+
+  const [sliding, facts, branching] = compare.variants;
+  compareSummary.className = 'compare-card';
+  compareSummary.innerHTML = `
+    <h3>Итог: 3 стратегии на сценарии «Сбор ТЗ»</h3>
+    <div class="compare-table-wrap">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th>Метрика</th>
+            <th>Sliding Window</th>
+            <th>Sticky Facts</th>
+            <th>Branching</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Токены сессии</td>
+            <td>${formatExactTokens(sliding?.sessionTotalTokens)}</td>
+            <td>${formatExactTokens(facts?.sessionTotalTokens)}</td>
+            <td>${formatExactTokens(branching?.sessionTotalTokens)}</td>
+          </tr>
+          <tr>
+            <td>Стоимость</td>
+            <td>${formatCost(sliding?.sessionCostUsd)}</td>
+            <td>${formatCost(facts?.sessionCostUsd)}</td>
+            <td>${formatCost(branching?.sessionCostUsd)}</td>
+          </tr>
+          <tr>
+            <td>Фактов (Facts)</td>
+            <td>—</td>
+            <td>${facts?.factsCount ?? 0}</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td>Стабильность (эвристика)</td>
+            <td>Низкая — ранние детали теряются</td>
+            <td>Высокая — facts сохраняют решения</td>
+            <td>Зависит от ветки</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+  compareSummary.classList.remove('hidden');
+}
+
 async function consumeCompressionCompareStream(signal) {
   const response = await fetch('/api/agent/compression-compare/stream', {
     signal,
@@ -838,6 +1176,7 @@ async function handleCompressionCompareEvent(event) {
         id: 'compression',
         modelContextLimit: event.modelContextLimit,
       };
+      if (comparePanelTitle) comparePanelTitle.textContent = 'Сравнение сжатия истории';
       comparePanel?.classList.remove('hidden');
       scenarioTablePanel?.classList.add('hidden');
       if (comparePanelDesc) {
@@ -985,6 +1324,172 @@ async function loadTokenScenario(scenario) {
   }
 }
 
+async function consumeStrategyCompareStream(signal) {
+  const response = await fetch('/api/agent/strategy-compare/stream', {
+    signal,
+    headers: { Accept: 'text/event-stream' },
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorResponse(response));
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary = buffer.indexOf('\n\n');
+    while (boundary >= 0) {
+      const chunk = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const event = parseSseEvent(chunk);
+      if (event) {
+        await handleStrategyCompareEvent(event);
+      }
+      boundary = buffer.indexOf('\n\n');
+    }
+  }
+}
+
+async function handleStrategyCompareEvent(event) {
+  switch (event.event) {
+    case 'strategy_compare_start':
+      activeScenarioMeta = {
+        id: 'strategies',
+        modelContextLimit: event.modelContextLimit,
+      };
+      comparePanel?.classList.remove('hidden');
+      scenarioTablePanel?.classList.add('hidden');
+      if (comparePanelTitle) comparePanelTitle.textContent = 'Сравнение стратегий контекста';
+      if (comparePanelDesc) {
+        comparePanelDesc.textContent = event.description || 'Сценарий «Сбор ТЗ» на 3 стратегиях';
+      }
+      clearCompareOutput();
+      comparePanel?.querySelector('.compare-panel__content')?.classList.add('compare-panel__content--strategies');
+      comparePanel?.classList.remove('hidden');
+      setLoading(true);
+      break;
+
+    case 'strategy_start':
+      appendMessage('info', `[${event.title}] Запуск прогона`);
+      break;
+
+    case 'user':
+      appendMessage('user', event.content);
+      break;
+
+    case 'facts_updated':
+      if (event.facts) {
+        const factLines = Object.entries(event.facts)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join('; ');
+        appendMessage('info', `Facts обновлены (ход ${event.turn}): ${factLines}`);
+      }
+      break;
+
+    case 'branch_created':
+      appendMessage(
+        'info',
+        `Ветки созданы на ходу ${event.turn}: ${(event.branches || []).map((b) => b.label).join(', ')}`,
+      );
+      break;
+
+    case 'turn':
+      await appendMessageGradually('assistant', event.content || '');
+      if (event.step) {
+        updateTokenPanel(
+          tokenPanelFromStep(event.step, activeScenarioMeta?.modelContextLimit, false),
+          true,
+        );
+      }
+      break;
+
+    case 'strategy_variant_done': {
+      const variant = event.strategyVariantResult;
+      const probeTurn = 10;
+      if (variant?.mode === 'sliding_window') {
+        renderStrategyVariantCard(compareStrategySliding, variant, probeTurn);
+      } else if (variant?.mode === 'sticky_facts') {
+        renderStrategyVariantCard(compareStrategyFacts, variant, probeTurn);
+      } else if (variant?.mode === 'branching') {
+        renderStrategyVariantCard(compareStrategyBranching, variant, probeTurn);
+      }
+      break;
+    }
+
+    case 'strategy_compare_done':
+      renderStrategyCompareSummary(event.strategyCompareResult);
+      if (event.strategyCompareResult?.variants) {
+        for (const variant of event.strategyCompareResult.variants) {
+          const container =
+            variant.mode === 'sliding_window'
+              ? compareStrategySliding
+              : variant.mode === 'sticky_facts'
+                ? compareStrategyFacts
+                : compareStrategyBranching;
+          renderStrategyVariantCard(container, variant, event.strategyCompareResult.probeTurn || 10);
+        }
+      }
+      setLoading(false);
+      break;
+
+    default:
+      break;
+  }
+}
+
+async function loadStrategyCompare() {
+  clearError();
+  activeRequestId += 1;
+  const requestId = activeRequestId;
+  sessionId = null;
+  persistSessionId(null);
+  activeScenarioMeta = null;
+  lastScenarioStep = null;
+
+  clearMessages();
+  clearScenarioOutput();
+  clearCompareOutput();
+  resetTokenPanel();
+
+  setControlsDisabled(true);
+  setLoading(true);
+  statsPanel.classList.remove('hidden');
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 45 * 60 * 1000);
+
+  try {
+    await consumeStrategyCompareStream(controller.signal);
+    if (requestId === activeRequestId) {
+      clearError();
+    }
+  } catch (error) {
+    if (requestId !== activeRequestId) {
+      return;
+    }
+    showError(
+      error.name === 'AbortError'
+        ? 'Сравнение прервано по таймауту. Попробуйте снова.'
+        : error.message,
+    );
+  } finally {
+    clearTimeout(timeoutId);
+    if (requestId === activeRequestId) {
+      setLoading(false);
+      setControlsDisabled(false);
+    }
+  }
+}
+
 sendBtn.addEventListener('click', sendPrompt);
 newDialogBtn.addEventListener('click', startNewDialog);
 compressionToggleBtn.addEventListener('click', toggleCompression);
@@ -992,6 +1497,12 @@ scenarioShortBtn.addEventListener('click', () => loadTokenScenario('short'));
 scenarioLongBtn.addEventListener('click', () => loadTokenScenario('long'));
 scenarioOverflowBtn.addEventListener('click', () => loadTokenScenario('overflow'));
 compareCompressionBtn.addEventListener('click', loadCompressionCompare);
+compareStrategiesBtn.addEventListener('click', loadStrategyCompare);
+branchCheckpointBtn?.addEventListener('click', createBranchCheckpoint);
+branchCreateBtn?.addEventListener('click', createBranches);
+for (const btn of STRATEGY_BUTTONS) {
+  btn?.addEventListener('click', () => selectStrategy(btn.dataset.strategy));
+}
 
 promptInput.addEventListener('input', resizeInput);
 
@@ -1003,7 +1514,7 @@ promptInput.addEventListener('keydown', (event) => {
 });
 
 resizeInput();
-updateCompressionToggleUi();
+updateStrategyUi();
 restoreSessionFromStorage().finally(() => {
   promptInput.focus();
 });
