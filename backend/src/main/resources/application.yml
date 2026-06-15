@@ -19,6 +19,14 @@ app:
     temperature: 0.5
     max-tokens: 512
     context-window: 128000
+    compression:
+      enabled: true
+      keep-last-messages: 6
+      summarize-every-messages: 10
+      summary-system-prompt: |
+        Сожми переписку в краткое резюме на русском.
+        Сохрани: имена, даты, решения, планы, числа, места.
+        Без вступлений — только факты.
     pricing:
       prompt-per-million: 0.15
       completion-per-million: 0.60

@@ -195,6 +195,18 @@ body {
   color: #991b1b;
 }
 
+.chat-header__action--active {
+  background: var(--accent-soft);
+  border-color: rgba(79, 70, 229, 0.35);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.message--summary .message__bubble {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
 .typing-dots {
   display: inline-flex;
   gap: 3px;

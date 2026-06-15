@@ -23,29 +23,6 @@ public class TokenDemoService {
     private static final Logger log = LoggerFactory.getLogger(TokenDemoService.class);
 
     private static final int SHORT_TURNS = 4;
-    private static final int LONG_TURNS = 20;
-
-    private static final List<String> LONG_DIALOG_PROMPTS = List.of(
-            "Привет! Меня зовут Алекс. Помоги спланировать поездку в Прагу на выходные — с чего начать?",
-            "Я прилетаю в пятницу вечером. Какой район выбрать для отеля, если хочу много гулять пешком?",
-            "Какие музеи стоит посетить в субботу утром, если у меня только полдня?",
-            "Посоветуй три кафе или ресторана рядом со Староместской площадью — желательно не слишком туристических.",
-            "Как добраться из аэропорта Вацлава Гавела до центра без такси?",
-            "Сколько евро заложить на еду за два дня при среднем бюджете?",
-            "Хочу вечером послушать живую музыку — куда сходить в Праге в субботу?",
-            "Есть ли смысл покупать Prague Card на два дня, если я планирую 2–3 музея?",
-            "Какой пеший маршрут на воскресное утро с красивыми видами и без толп?",
-            "Что купить в подарок из Чехии, чтобы не переплатить на рынках?",
-            "А если в воскресенье пойдёт дождь — чем заменить прогулку по Карлову мосту?",
-            "Хочу успеть Пражский град и собор Святого Вита — как распределить время?",
-            "Пересмотрим план субботы: сначала обед, потом музей — как уложиться до 18:00?",
-            "Где недорого поужинать после прогулки по Малой стране?",
-            "Напомни кратко, что мы уже наметили на субботу и воскресенье.",
-            "Стоит ли ехать в Карловы Вары одним днём из Праги, если у меня только выходные?",
-            "Какие районы вечером лучше обходить стороной с точки зрения безопасности?",
-            "Какие приложения или карты пригодятся туристу в Праге?",
-            "Что положить в рюкзак на день активных прогулок по городу?",
-            "Подведи итог: финальный маршрут на два дня с примерным таймингом по часам.");
 
     private final ChatAgent chatAgent;
     private final ConversationStore conversationStore;
@@ -118,8 +95,8 @@ public class TokenDemoService {
                 "",
                 contextLimit));
 
-        log.info("Длинный сценарий: {} реальных вызовов API...", LONG_TURNS);
-        DialogRunResult result = runRealDialogStreaming(LONG_DIALOG_PROMPTS, "long", sink);
+        log.info("Длинный сценарий: {} реальных вызовов API...", DialogPrompts.LONG_DIALOG_TURNS);
+        DialogRunResult result = runRealDialogStreaming(DialogPrompts.LONG_DIALOG, "long", sink);
         if (result.failed()) {
             emitDialogFailureOutcome(result, sink);
             return;
@@ -159,7 +136,7 @@ public class TokenDemoService {
                 sink.accept(TokenScenarioStreamEvent.user(turn, prompt));
 
                 try {
-                    AgentResponse response = chatAgent.run(new AgentRequest(prompt, sessionId));
+                    AgentResponse response = chatAgent.run(new AgentRequest(prompt, sessionId, false));
                     sessionId = response.sessionId();
                     TokenDemoStep step = stepFromResponse(turn, response.tokens());
                     steps.add(step);
@@ -199,7 +176,7 @@ public class TokenDemoService {
                 sink.accept(TokenScenarioStreamEvent.user(turn + 1, prompt));
 
                 try {
-                    AgentResponse response = chatAgent.run(new AgentRequest(prompt, sessionId));
+                    AgentResponse response = chatAgent.run(new AgentRequest(prompt, sessionId, false));
                     sessionId = response.sessionId();
                     TokenDemoStep step = stepFromResponse(turn + 1, response.tokens());
                     steps.add(step);

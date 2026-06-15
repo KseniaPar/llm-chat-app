@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 8 — Работа с токенами</title>
+  <title>День 9 — Управление контекстом: сжатие истории</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -18,18 +18,20 @@
           <div class="chat-header__avatar" aria-hidden="true">AI</div>
           <div class="chat-header__info">
             <h1>Агент</h1>
-            <p>День 8 — подсчёт токенов и влияние контекста на стоимость</p>
+            <p>День 9 — сжатие истории и экономия токенов</p>
           </div>
           <span id="loading" class="chat-header__status hidden" aria-live="polite">
             <span class="typing-dots"><span></span><span></span><span></span></span>
             печатает
           </span>
+          <button id="compression-toggle-btn" class="chat-header__action chat-header__action--active" type="button" title="Сжимать историю каждые 10 сообщений">Сжатие: вкл</button>
           <button id="new-dialog-btn" class="chat-header__action" type="button" title="Очистить чат и начать заново">Новый диалог</button>
         </div>
         <div class="chat-header__scenarios">
           <button id="scenario-short-btn" class="chat-header__action" type="button" title="4 вызова API">Маленький диалог</button>
           <button id="scenario-long-btn" class="chat-header__action" type="button" title="20 вызовов API — показывает рост истории и токенов">Большой диалог</button>
           <button id="scenario-overflow-btn" class="chat-header__action" type="button" title="5 вызовов — фрагменты длинного текста, переполнение на последнем">Переполнение</button>
+          <button id="compare-compression-btn" class="chat-header__action" type="button" title="Сравнить один диалог без сжатия и со сжатием">Сравнить сжатие</button>
         </div>
       </header>
 
@@ -90,12 +92,27 @@
         <div id="token-bar-fill" class="token-bar__fill"></div>
       </div>
       <p id="token-warning" class="token-panel__warning hidden"></p>
+      <p id="compression-info" class="token-panel__warning hidden"></p>
     </aside>
     </div>
 
     <section id="scenario-table-panel" class="scenario-table-panel hidden" aria-live="polite">
       <h2 class="scenario-table-panel__title">Шаги сценария</h2>
       <div id="scenario-table" class="scenario-table-panel__table"></div>
+    </section>
+
+    <section id="compare-panel" class="compare-panel hidden" aria-live="polite">
+      <div class="compare-panel__header">
+        <div>
+          <h2>Сравнение сжатия истории</h2>
+          <p id="compare-panel-desc">Один диалог из 20 ходов — без сжатия и со сжатием</p>
+        </div>
+      </div>
+      <div class="compare-panel__content">
+        <div id="compare-summary" class="compare-card hidden"></div>
+        <div id="compare-raw-card" class="compare-card hidden"></div>
+        <div id="compare-compressed-card" class="compare-card hidden"></div>
+      </div>
     </section>
   </main>
 

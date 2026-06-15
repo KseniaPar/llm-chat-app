@@ -1,6 +1,7 @@
 package com.example.llmchat.controller;
 
 import com.example.llmchat.agent.ChatAgent;
+import com.example.llmchat.agent.CompressionCompareService;
 import com.example.llmchat.agent.ConversationStore;
 import com.example.llmchat.agent.TokenDemoService;
 import com.example.llmchat.dto.AgentHistoryResponse;
@@ -32,14 +33,17 @@ public class AgentController {
     private final ChatAgent chatAgent;
     private final ConversationStore conversationStore;
     private final TokenDemoService tokenDemoService;
+    private final CompressionCompareService compressionCompareService;
 
     public AgentController(
             ChatAgent chatAgent,
             ConversationStore conversationStore,
-            TokenDemoService tokenDemoService) {
+            TokenDemoService tokenDemoService,
+            CompressionCompareService compressionCompareService) {
         this.chatAgent = chatAgent;
         this.conversationStore = conversationStore;
         this.tokenDemoService = tokenDemoService;
+        this.compressionCompareService = compressionCompareService;
     }
 
     @PostMapping("/chat")
@@ -60,6 +64,24 @@ public class AgentController {
     public TokenScenarioResult tokenScenario(@RequestParam String scenario) {
         log.info("GET /api/agent/token-scenario — сценарий: {}", scenario);
         return tokenDemoService.runScenario(scenario);
+    }
+
+    @GetMapping(value = "/compression-compare/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamCompressionCompare() {
+        log.info("GET /api/agent/compression-compare/stream");
+
+        SseEmitter emitter = new SseEmitter(900_000L);
+        CompletableFuture.runAsync(() -> {
+            try {
+                compressionCompareService.runComparisonStreaming(event -> sendStreamEvent(emitter, event));
+                emitter.complete();
+            } catch (Exception exception) {
+                log.error("Ошибка стрима сравнения сжатия", exception);
+                emitter.completeWithError(exception);
+            }
+        });
+
+        return emitter;
     }
 
     @GetMapping(value = "/token-scenario/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -94,6 +116,9 @@ public class AgentController {
         if (sessionId == null || sessionId.isBlank() || !conversationStore.hasSession(sessionId)) {
             throw new IllegalArgumentException("Сессия не найдена.");
         }
-        return new AgentHistoryResponse(sessionId, conversationStore.getHistory(sessionId));
+        return new AgentHistoryResponse(
+                sessionId,
+                conversationStore.getFullHistoryForDisplay(sessionId),
+                conversationStore.getSummary(sessionId));
     }
 }
