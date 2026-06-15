@@ -92,10 +92,19 @@ public class ConversationPersistence {
 
             Map<String, SessionState> snapshot = new LinkedHashMap<>();
             for (Map.Entry<String, SessionState> entry : sessions.entrySet()) {
+                SessionState source = entry.getValue();
                 SessionState copy = new SessionState();
-                copy.setSummary(entry.getValue().getSummary());
-                copy.setMessages(List.copyOf(entry.getValue().getMessages()));
-                copy.setTotalMessageCount(entry.getValue().getTotalMessageCount());
+                copy.setSummary(source.getSummary());
+                copy.setMessages(List.copyOf(source.getMessages() != null ? source.getMessages() : List.of()));
+                copy.setTotalMessageCount(source.getTotalMessageCount());
+                copy.setContextStrategy(source.getContextStrategy());
+                copy.setFacts(source.getFacts() != null ? new LinkedHashMap<>(source.getFacts()) : new LinkedHashMap<>());
+                copy.setBranchGroupId(source.getBranchGroupId());
+                copy.setActiveBranchId(source.getActiveBranchId());
+                copy.setBranches(source.getBranches() != null ? new ArrayList<>(source.getBranches()) : new ArrayList<>());
+                copy.setForkMessageIndex(source.getForkMessageIndex());
+                copy.setSharedPrefix(source.getSharedPrefix() != null ? new ArrayList<>(source.getSharedPrefix()) : new ArrayList<>());
+                copy.setBranchMessages(source.getBranchMessages() != null ? new ArrayList<>(source.getBranchMessages()) : new ArrayList<>());
                 snapshot.put(entry.getKey(), copy);
             }
 
