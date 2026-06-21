@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 13 — Состояние задачи</title>
+  <title>День 14 — Бизнес-инварианты</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -13,7 +13,7 @@
   <div id="auth-overlay" class="auth-overlay">
     <section class="auth-card">
       <h2 class="auth-card__title">Вход в платформу</h2>
-      <p class="auth-card__desc">День 13 — формализованное состояние учебной задачи</p>
+      <p class="auth-card__desc">День 14 — бизнес-инварианты учебного ассистента</p>
       <div class="auth-card__tabs">
         <button id="auth-tab-login" class="auth-card__tab auth-card__tab--active" type="button">Вход</button>
         <button id="auth-tab-register" class="auth-card__tab" type="button">Регистрация</button>
@@ -41,7 +41,7 @@
             <div class="chat-header__avatar" aria-hidden="true">AI</div>
             <div class="chat-header__info">
               <h1>Агент</h1>
-              <p>День 13 — состояние задачи + память + профиль</p>
+              <p>День 14 — бизнес-инварианты + задача + память + профиль</p>
             </div>
             <span id="auth-user-label" class="chat-header__user"></span>
             <span id="loading" class="chat-header__status hidden" aria-live="polite">
@@ -160,6 +160,13 @@
               <button id="task-resume-btn" class="task-panel__btn task-panel__btn--primary hidden" type="button">Продолжить</button>
             </div>
           </div>
+        </div>
+        <div id="invariants-panel" class="invariants-panel">
+          <h3 class="invariants-panel__title">
+            Бизнес-правила
+            <span id="invariants-count-badge" class="invariants-panel__badge">13</span>
+          </h3>
+          <ul id="invariants-list" class="invariants-panel__list"></ul>
         </div>
         <div id="memory-panel" class="memory-panel">
           <h3 class="memory-panel__title">Память агента</h3>

@@ -10,8 +10,10 @@ import com.example.llmchat.dto.AgentRequest;
 import com.example.llmchat.dto.AgentResetRequest;
 import com.example.llmchat.dto.AgentResponse;
 import com.example.llmchat.dto.MemorySnapshotResponse;
+import com.example.llmchat.dto.InvariantDto;
 import com.example.llmchat.dto.TaskSessionRequest;
 import com.example.llmchat.dto.TaskStateResponse;
+import com.example.llmchat.invariants.InvariantsService;
 import com.example.llmchat.memory.MemoryManager;
 import com.example.llmchat.task.TaskState;
 import com.example.llmchat.task.TaskStateService;
@@ -24,6 +26,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/agent")
 public class AgentController {
@@ -34,16 +38,19 @@ public class AgentController {
     private final ConversationStore conversationStore;
     private final MemoryManager memoryManager;
     private final TaskStateService taskStateService;
+    private final InvariantsService invariantsService;
 
     public AgentController(
             ChatAgent chatAgent,
             ConversationStore conversationStore,
             MemoryManager memoryManager,
-            TaskStateService taskStateService) {
+            TaskStateService taskStateService,
+            InvariantsService invariantsService) {
         this.chatAgent = chatAgent;
         this.conversationStore = conversationStore;
         this.memoryManager = memoryManager;
         this.taskStateService = taskStateService;
+        this.invariantsService = invariantsService;
     }
 
     @PostMapping("/chat")
@@ -96,6 +103,12 @@ public class AgentController {
             throw new IllegalArgumentException("Сессия не принадлежит пользователю.");
         }
         return memoryManager.getMemorySnapshot(user.userId(), sessionId);
+    }
+
+    @GetMapping("/invariants")
+    public List<InvariantDto> invariants() {
+        AuthContext.requireUser();
+        return invariantsService.allDtos();
     }
 
     @GetMapping("/task")

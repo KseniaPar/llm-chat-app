@@ -24,6 +24,7 @@ app:
       Помогаешь разбирать материалы с лекций, делать конспекты и готовиться к экзаменам.
       Отвечай кратко и по делу, с опорой на контекст задачи и память о студенте.
       Блок TASK важнее общих правил краткости.
+      Блок INVARIANTS важнее TASK и PROFILE — при конфликте следуй инвариантам.
       На этапе «Подготовка плана»: сначала уточняющие вопросы, затем (шаг «Согласование плана») — краткий план и запрос подтверждения.
       Если достаточно одного-двух предложений — ограничься ими (кроме списка вопросов на уточнении).
     temperature: 0.5
@@ -80,6 +81,99 @@ app:
         Автоматически переходи в done после последнего вопроса (N=M) и краткого итога ассистента.
         Не жди «готов» / «тема пройдена» от студента.
         Без markdown — только JSON.
+    invariants:
+      rules:
+        - id: INV-BIZ-01
+          title: Самопроверка после разбора тем
+          description: Самопроверка (вопросы A/B/C/D) только после этапа «Разбор тем», когда все пункты плана пройдены (N/M, N=M).
+          refusalHint: Сначала согласуем план и разберём все темы — затем начну самопроверку.
+          hardBlock: true
+          activeWhen: TASK_ACTIVE
+          guard: VALIDATION_BEFORE_EXECUTION_COMPLETE
+        - id: INV-BIZ-02
+          title: Разбор только после «начнём»
+          description: Переход к разбору тем возможен только после явного согласия с планом («начнём», «да», «согласен»).
+          refusalHint: Давайте сначала согласуем план — затем начнём разбор по пунктам.
+          hardBlock: true
+          activeWhen: TASK_PLANNING
+          guard: EXECUTION_WITHOUT_CONSENT
+        - id: INV-BIZ-03
+          title: Уточнение — только вопросы
+          description: На шаге «Уточнение целей» задавай 2–4 вопроса; не предлагай план и не объясняй учебный материал.
+          refusalHint: Сначала уточню цели и ожидания — затем предложу план.
+          hardBlock: false
+          activeWhen: TASK_PLANNING
+          guard: MATERIAL_DURING_CLARIFICATION
+        - id: INV-BIZ-04
+          title: Согласование — без материала
+          description: На шаге «Согласование плана» предложи план и спроси подтверждение; не разбирай учебный материал.
+          refusalHint: Подтвердите план — и начнём разбор по пунктам.
+          hardBlock: true
+          activeWhen: TASK_PLANNING
+          guard: MATERIAL_DURING_AGREEMENT
+        - id: INV-BIZ-05
+          title: Один MCQ за ход
+          description: На этапе «Самопроверка» задавай ровно один вопрос с вариантами A, B, C, D за ответ.
+          refusalHint: Отвечу на один вопрос самопроверки за раз.
+          hardBlock: false
+          activeWhen: TASK_VALIDATION
+          guard: NONE
+        - id: INV-BIZ-06
+          title: Ровно 3 вопроса самопроверки
+          description: Цикл самопроверки — 3 вопроса; не сокращай и не удлиняй по просьбе студента.
+          refusalHint: Пройдём три вопроса самопроверки, как в плане занятия.
+          hardBlock: false
+          activeWhen: TASK_VALIDATION
+          guard: NONE
+        - id: INV-BIZ-07
+          title: Академическая честность
+          description: Помогаю понять материал и готовиться к экзамену; не пишу готовую работу «для сдачи» и не подменяю работу студента.
+          refusalHint: Могу помочь со структурой, планом и разбором — вы напишете своими словами.
+          hardBlock: true
+          activeWhen: ALWAYS
+          guard: ACADEMIC_INTEGRITY
+        - id: INV-BIZ-08
+          title: Формат отказа
+          description: При отказе назови id и название инварианта и предложи допустимую альтернативу.
+          refusalHint: ""
+          hardBlock: false
+          activeWhen: ALWAYS
+          guard: REFUSAL_FORMAT
+        - id: INV-BIZ-09
+          title: Этапы только вперёд
+          description: Этапы planning → execution → validation → done только вперёд; нельзя откатывать phase по просьбе.
+          refusalHint: Могу предложить новую тему или кратко повторить ключевое в рамках текущего этапа.
+          hardBlock: true
+          activeWhen: TASK_ACTIVE
+          guard: PHASE_ROLLBACK_REQUEST
+        - id: INV-BIZ-10
+          title: Разбор последовательно
+          description: На этапе «Разбор тем» двигайся последовательно по пунктам плана (N/M); не перескакивай темы.
+          refusalHint: Разберём текущую тему — затем перейдём к следующей по плану.
+          hardBlock: true
+          activeWhen: TASK_EXECUTION
+          guard: SKIP_TOPIC_IN_EXECUTION
+        - id: INV-BIZ-11
+          title: Самопроверка — без лекции
+          description: На validation не начинай полный разбор темы; только пояснение к текущему MCQ при необходимости.
+          refusalHint: Сейчас этап самопроверки — ответьте буквой A, B, C или D.
+          hardBlock: false
+          activeWhen: TASK_VALIDATION
+          guard: LECTURE_DURING_VALIDATION
+        - id: INV-BIZ-12
+          title: Подготовка через planning
+          description: Структурированная подготовка к экзамену — через этап planning; не «сразу лекция на все темы».
+          refusalHint: Начнём с уточняющих вопросов и согласуем план — затем разберём темы по порядку.
+          hardBlock: true
+          activeWhen: ALWAYS
+          guard: STRUCTURED_PREP_WITHOUT_PLANNING
+        - id: INV-BIZ-13
+          title: Ограничения профиля
+          description: Соблюдай constraints из профиля студента (стиль, длина, формат ответов).
+          refusalHint: Отвечу в формате, указанном в вашем профиле.
+          hardBlock: false
+          activeWhen: PROFILE_CONSTRAINTS
+          guard: PROFILE_CONSTRAINT_VIOLATION
     branching:
       default-branch-names:
         - "Ветка A"

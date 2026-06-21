@@ -7,6 +7,10 @@ import com.example.llmchat.dto.AgentChatMessage;
 import com.example.llmchat.dto.MemoryContextSnapshot;
 import com.example.llmchat.dto.UserProfileSnapshot;
 import com.example.llmchat.dto.TaskStateSnapshot;
+import com.example.llmchat.invariants.InvariantCheckResult;
+import com.example.llmchat.invariants.InvariantContext;
+import com.example.llmchat.invariants.InvariantsService;
+import com.example.llmchat.dto.InvariantsSnapshot;
 import com.example.llmchat.personalization.PersonalizationService;
 import com.example.llmchat.personalization.UserProfile;
 import com.example.llmchat.task.TaskState;
@@ -16,7 +20,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 
 @Component
 public class ContextAssembler {
@@ -25,6 +29,7 @@ public class ContextAssembler {
     private final ContextCompressionService contextCompressionService;
     private final PersonalizationService personalizationService;
     private final TaskStateService taskStateService;
+    private final InvariantsService invariantsService;
     private final String systemPrompt;
 
     public ContextAssembler(
@@ -32,11 +37,13 @@ public class ContextAssembler {
             ContextCompressionService contextCompressionService,
             PersonalizationService personalizationService,
             TaskStateService taskStateService,
+            InvariantsService invariantsService,
             @Value("${app.agent.system-prompt}") String systemPrompt) {
         this.memoryManager = memoryManager;
         this.contextCompressionService = contextCompressionService;
         this.personalizationService = personalizationService;
         this.taskStateService = taskStateService;
+        this.invariantsService = invariantsService;
         this.systemPrompt = systemPrompt;
     }
 
@@ -46,6 +53,16 @@ public class ContextAssembler {
             String prompt,
             ContextStrategy strategy,
             boolean useDay10Strategy) {
+        return assemble(userId, sessionId, prompt, strategy, useDay10Strategy, null);
+    }
+
+    public AssembledContext assemble(
+            String userId,
+            String sessionId,
+            String prompt,
+            ContextStrategy strategy,
+            boolean useDay10Strategy,
+            InvariantCheckResult invariantCheck) {
         MemoryContextSnapshot snapshot = memoryManager.buildContextSnapshot(userId, sessionId, strategy);
         List<String> logs = new ArrayList<>(snapshot.memoryLogs());
 
@@ -74,6 +91,22 @@ public class ContextAssembler {
             messages.add(new OpenRouterHttpClient.ChatMessage("system", taskBlock));
         }
         TaskStateSnapshot taskStateSnapshot = taskStateService.toSnapshot(taskState, taskApplied);
+
+        InvariantContext invariantContext = new InvariantContext(
+                userId,
+                sessionId,
+                prompt,
+                Optional.ofNullable(taskState),
+                profile);
+        String invariantsBlock = invariantsService.formatInvariantsBlock(invariantContext, invariantCheck);
+        boolean invariantsApplied = invariantsBlock != null;
+        List<String> invariantLogs = invariantsService.buildInvariantsLogs(
+                invariantContext, invariantsApplied, invariantCheck);
+        InvariantsSnapshot invariantsSnapshot = invariantsService.toSnapshot(
+                invariantContext, invariantsApplied, invariantCheck);
+        if (invariantsApplied) {
+            messages.add(new OpenRouterHttpClient.ChatMessage("system", invariantsBlock));
+        }
 
         String longTermBlock = memoryManager.formatLongTermBlock(snapshot.longTermInContext());
         if (longTermBlock != null) {
@@ -121,7 +154,10 @@ public class ContextAssembler {
                 personalizationLogs,
                 taskBlock,
                 taskStateSnapshot,
-                taskStateLogs);
+                taskStateLogs,
+                invariantsBlock,
+                invariantsSnapshot,
+                invariantLogs);
     }
 
     public record AssembledContext(
@@ -136,6 +172,9 @@ public class ContextAssembler {
             List<String> personalizationLogs,
             String taskBlock,
             TaskStateSnapshot taskStateSnapshot,
-            List<String> taskStateLogs) {
+            List<String> taskStateLogs,
+            String invariantsBlock,
+            InvariantsSnapshot invariantsSnapshot,
+            List<String> invariantLogs) {
     }
 }

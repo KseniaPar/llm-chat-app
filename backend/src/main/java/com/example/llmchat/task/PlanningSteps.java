@@ -1,6 +1,6 @@
 package com.example.llmchat.task;
 
-final class PlanningSteps {
+public final class PlanningSteps {
 
     static final String CLARIFICATION = "Уточнение целей и ожиданий";
     static final String AGREEMENT = "Согласование плана";
@@ -8,7 +8,7 @@ final class PlanningSteps {
     private PlanningSteps() {
     }
 
-    static boolean isAgreement(String currentStep, String expectedAction) {
+    public static boolean isAgreement(String currentStep, String expectedAction) {
         return containsAgreementMarker(currentStep) || containsAgreementMarker(expectedAction);
     }
 

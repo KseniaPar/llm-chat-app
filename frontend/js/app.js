@@ -47,6 +47,8 @@ const taskExpectedAction = document.getElementById('task-expected-action');
 const taskPausedLabel = document.getElementById('task-paused-label');
 const taskPauseBtn = document.getElementById('task-pause-btn');
 const taskResumeBtn = document.getElementById('task-resume-btn');
+const invariantsList = document.getElementById('invariants-list');
+const invariantsCountBadge = document.getElementById('invariants-count-badge');
 
 const CHAR_DELAY_MS = 18;
 const SESSION_STORAGE_KEY = 'llm-chat-session-id';
@@ -152,7 +154,7 @@ async function handleAuthSubmit(event) {
     localStorage.setItem(JWT_STORAGE_KEY, authToken);
     localStorage.setItem(AUTH_USER_STORAGE_KEY, authUsernameValue);
     hideAuthOverlay();
-    await Promise.all([restoreSessionFromStorage(), loadProfile(), loadTaskState()]);
+    await Promise.all([restoreSessionFromStorage(), loadProfile(), loadTaskState(), loadInvariants()]);
     promptInput?.focus();
   } catch (error) {
     if (authError) {
@@ -180,7 +182,7 @@ function escapeHtml(text) {
     .replaceAll('"', '&quot;');
 }
 
-function renderMemoryPanel(snapshot, logs, personalizationLogs, profileSnapshot, taskStateLogs) {
+function renderMemoryPanel(snapshot, logs, personalizationLogs, profileSnapshot, taskStateLogs, invariantLogs) {
   if (!memoryPanel) return;
   memoryPanel.classList.remove('hidden');
 
@@ -226,7 +228,7 @@ function renderMemoryPanel(snapshot, logs, personalizationLogs, profileSnapshot,
     .join('');
   memoryTabLong.innerHTML = longHtml || '<p>Нет долговременных данных</p>';
 
-  const allLogs = [...(taskStateLogs || []), ...(personalizationLogs || []), ...(logs || [])];
+  const allLogs = [...(invariantLogs || []), ...(taskStateLogs || []), ...(personalizationLogs || []), ...(logs || [])];
   if (memoryLogsEl) {
     if (profileSnapshot?.appliedToPrompt) {
       allLogs.unshift('Активный профиль применён к запросу');
@@ -273,6 +275,39 @@ async function loadTaskState() {
     if (!response.ok) return;
     const data = await response.json();
     renderTaskPanel(data.active ? data : null);
+  } catch {
+    // optional
+  }
+}
+
+function renderInvariantsPanel(rules) {
+  if (!invariantsList) return;
+  const items = rules || [];
+  if (invariantsCountBadge) {
+    invariantsCountBadge.textContent = String(items.length);
+  }
+  invariantsList.innerHTML = items.length
+    ? items
+        .map(
+          (rule) => `<li class="invariants-panel__item">
+          <div class="invariants-panel__head">
+            <span class="invariants-panel__id">${escapeHtml(rule.id)}</span>
+            ${rule.hardBlock ? '<span class="invariants-panel__tag">hard</span>' : ''}
+          </div>
+          <strong class="invariants-panel__name">${escapeHtml(rule.title)}</strong>
+          <p class="invariants-panel__desc">${escapeHtml(rule.description || '')}</p>
+        </li>`,
+        )
+        .join('')
+    : '<li class="invariants-panel__empty">Нет правил</li>';
+}
+
+async function loadInvariants() {
+  if (!getAuthToken()) return;
+  try {
+    const response = await apiFetch('/api/agent/invariants');
+    if (!response.ok) return;
+    renderInvariantsPanel(await response.json());
   } catch {
     // optional
   }
@@ -393,6 +428,7 @@ async function loadMemoryPanel() {
       data.memoryLogs || [],
       [],
       null,
+      [],
       [],
     );
   } catch {
@@ -682,9 +718,15 @@ async function sendMessage(prompt) {
         data.personalizationLogs || [],
         data.profileSnapshot || null,
         data.taskStateLogs || [],
+        data.invariantLogs || [],
       );
     } else {
       await loadMemoryPanel();
+    }
+    if (data.invariantsSnapshot?.rules?.length) {
+      renderInvariantsPanel(data.invariantsSnapshot.rules);
+    } else {
+      await loadInvariants();
     }
     if (data.taskStateSnapshot) {
       renderTaskPanel({
@@ -753,7 +795,7 @@ resizeInput();
 
 if (getAuthToken()) {
   hideAuthOverlay();
-  Promise.all([restoreSessionFromStorage(), loadProfile(), loadTaskState()]).finally(() =>
+  Promise.all([restoreSessionFromStorage(), loadProfile(), loadTaskState(), loadInvariants()]).finally(() =>
     promptInput.focus(),
   );
 } else {

@@ -2,7 +2,7 @@ package com.example.llmchat.task;
 
 import java.util.regex.Pattern;
 
-final class TaskStateTransitions {
+public final class TaskStateTransitions {
 
     private static final Pattern READY_FOR_EXECUTION = Pattern.compile(
             "\\b(начн(?:ём|ем|и)|давай\\s+(?:начн|разбор|по\\s+плану)|план\\s+(?:подходит|ок|согласен)|"
@@ -30,7 +30,7 @@ final class TaskStateTransitions {
     private TaskStateTransitions() {
     }
 
-    static boolean executionComplete(TaskState state) {
+    public static boolean executionComplete(TaskState state) {
         if (state == null) {
             return false;
         }
@@ -93,7 +93,7 @@ final class TaskStateTransitions {
         return text == null ? "" : text.toLowerCase();
     }
 
-    static boolean readyForExecution(String userMessage, TaskState state) {
+    public static boolean readyForExecution(String userMessage, TaskState state) {
         if (userMessage == null) {
             return false;
         }
@@ -108,11 +108,11 @@ final class TaskStateTransitions {
                 && PLAN_AGREEMENT_CONFIRM.matcher(trimmed).find();
     }
 
-    static boolean readyForValidation(String userMessage) {
+    public static boolean readyForValidation(String userMessage) {
         return userMessage != null && READY_FOR_VALIDATION.matcher(userMessage.trim()).find();
     }
 
-    static boolean isMcqAnswer(String userMessage) {
+    public static boolean isMcqAnswer(String userMessage) {
         return userMessage != null && MCQ_ANSWER.matcher(userMessage.trim()).matches();
     }
 

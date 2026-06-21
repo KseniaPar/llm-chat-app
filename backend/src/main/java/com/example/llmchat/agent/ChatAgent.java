@@ -3,11 +3,20 @@ package com.example.llmchat.agent;
 import com.example.llmchat.dto.AgentChatMessage;
 import com.example.llmchat.dto.AgentRequest;
 import com.example.llmchat.dto.AgentResponse;
+import com.example.llmchat.dto.InvariantsSnapshot;
 import com.example.llmchat.dto.MemoryContextSnapshot;
 import com.example.llmchat.dto.TaskStateSnapshot;
 import com.example.llmchat.dto.TokenStats;
+import com.example.llmchat.dto.UserProfileSnapshot;
+import com.example.llmchat.dto.UserProfileSnapshot;
+import com.example.llmchat.invariants.InvariantCheckResult;
+import com.example.llmchat.invariants.InvariantContext;
+import com.example.llmchat.invariants.InvariantGuard;
+import com.example.llmchat.invariants.InvariantsService;
 import com.example.llmchat.memory.ContextAssembler;
 import com.example.llmchat.memory.MemoryManager;
+import com.example.llmchat.personalization.PersonalizationService;
+import com.example.llmchat.personalization.UserProfile;
 import com.example.llmchat.task.TaskState;
 import com.example.llmchat.task.TaskStateService;
 import com.example.llmchat.task.TaskStateUpdaterService;
@@ -17,6 +26,7 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @Component
 public class ChatAgent {
@@ -35,6 +45,9 @@ public class ChatAgent {
     private final MemoryManager memoryManager;
     private final TaskStateService taskStateService;
     private final TaskStateUpdaterService taskStateUpdaterService;
+    private final InvariantGuard invariantGuard;
+    private final InvariantsService invariantsService;
+    private final PersonalizationService personalizationService;
     private final String model;
     private final double temperature;
     private final int maxTokens;
@@ -51,6 +64,9 @@ public class ChatAgent {
             MemoryManager memoryManager,
             TaskStateService taskStateService,
             TaskStateUpdaterService taskStateUpdaterService,
+            InvariantGuard invariantGuard,
+            InvariantsService invariantsService,
+            PersonalizationService personalizationService,
             @Value("${app.openrouter.model}") String model,
             @Value("${app.agent.temperature}") double temperature,
             @Value("${app.agent.max-tokens}") int maxTokens) {
@@ -65,6 +81,9 @@ public class ChatAgent {
         this.memoryManager = memoryManager;
         this.taskStateService = taskStateService;
         this.taskStateUpdaterService = taskStateUpdaterService;
+        this.invariantGuard = invariantGuard;
+        this.invariantsService = invariantsService;
+        this.personalizationService = personalizationService;
         this.model = model;
         this.temperature = temperature;
         this.maxTokens = maxTokens;
@@ -147,8 +166,31 @@ public class ChatAgent {
             taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
         });
 
+        UserProfile profile = personalizationService.getProfile(userId);
+        Optional<TaskState> taskStateForGuard = taskStateService.getState(activeSessionId);
+        InvariantContext invariantContext = new InvariantContext(
+                userId,
+                activeSessionId,
+                prompt,
+                taskStateForGuard,
+                profile);
+        InvariantCheckResult invariantCheck = invariantGuard.check(invariantContext);
+
+        if (invariantCheck.hardBlock()) {
+            return buildInvariantRefusalResponse(
+                    sessionId,
+                    userId,
+                    activeSessionId,
+                    prompt,
+                    strategy,
+                    invariantContext,
+                    invariantCheck,
+                    taskStateLogs);
+        }
+
         ContextAssembler.AssembledContext assembled =
-                contextAssembler.assemble(userId, activeSessionId, prompt, strategy, useDay10Strategy);
+                contextAssembler.assemble(
+                        userId, activeSessionId, prompt, strategy, useDay10Strategy, invariantCheck);
         List<OpenRouterHttpClient.ChatMessage> messages = assembled.messages();
         MemoryContextSnapshot memorySnapshot = assembled.memorySnapshot();
 
@@ -160,13 +202,15 @@ public class ChatAgent {
                 + (assembled.factsBlock() != null ? 1 : 0)
                 + (assembled.summary() != null && !assembled.summary().isBlank() ? 1 : 0)
                 + (memorySnapshot.longTermInContext() != null && !memorySnapshot.longTermInContext().isEmpty() ? 1 : 0)
-                + (assembled.taskBlock() != null ? 1 : 0);
+                + (assembled.taskBlock() != null ? 1 : 0)
+                + (assembled.invariantsBlock() != null ? 1 : 0);
 
         List<String> logs = new ArrayList<>(assembled.memoryLogs());
         logs.addAll(assembled.personalizationLogs());
         logs.addAll(taskStateLogs);
         logs.addAll(assembled.taskStateLogs());
-        logs.add("Память: PROFILE + TASK + LONG + WORKING + SHORT (окно)");
+        logs.addAll(assembled.invariantLogs());
+        logs.add("Память: PROFILE + TASK + INVARIANTS + LONG + WORKING + SHORT (окно)");
         logs.add("Окно: " + contextStrategyService.windowSize() + " сообщений");
         int stored = conversationStore.getStoredMessageCount(activeSessionId);
         int dropped = Math.max(0, stored - assembled.messagesInContext());
@@ -301,7 +345,90 @@ public class ChatAgent {
                 assembled.profileSnapshot(),
                 List.copyOf(assembled.personalizationLogs()),
                 responseTaskSnapshot,
-                List.copyOf(taskStateLogs));
+                List.copyOf(taskStateLogs),
+                assembled.invariantsSnapshot(),
+                List.copyOf(assembled.invariantLogs()));
+    }
+
+    private AgentResponse buildInvariantRefusalResponse(
+            String sessionId,
+            String userId,
+            String activeSessionId,
+            String prompt,
+            ContextStrategy strategy,
+            InvariantContext invariantContext,
+            InvariantCheckResult invariantCheck,
+            List<String> taskStateLogs) {
+        String refusal = invariantGuard.formatRefusal(invariantCheck.hardBlocked());
+        List<String> invariantLogs = invariantsService.buildInvariantsLogs(
+                invariantContext, false, invariantCheck);
+        InvariantsSnapshot invariantsSnapshot = invariantsService.toSnapshot(
+                invariantContext, false, invariantCheck);
+
+        conversationStore.append(activeSessionId, "user", prompt);
+        conversationStore.append(activeSessionId, "assistant", refusal);
+        contextStrategyService.afterUserMessage(activeSessionId, strategy, prompt);
+        contextStrategyService.afterAssistantMessage(activeSessionId, strategy);
+
+        MemoryContextSnapshot memorySnapshot = memoryManager.buildContextSnapshot(
+                userId, activeSessionId, strategy);
+        TaskStateSnapshot taskSnapshot = taskStateService.toSnapshot(
+                taskStateService.getState(activeSessionId).orElse(null),
+                taskStateService.getState(activeSessionId).isPresent());
+
+        List<String> logs = new ArrayList<>();
+        logs.add("INVARIANTS: запрос заблокирован до вызова LLM");
+        logs.addAll(invariantLogs);
+        logs.addAll(taskStateLogs);
+
+        int promptTokens = tokenCounter.estimateTextTokens(prompt);
+        int responseTokens = tokenCounter.estimateTextTokens(refusal);
+        TokenStats tokenStats = new TokenStats(
+                promptTokens,
+                0,
+                promptTokens + responseTokens,
+                0,
+                responseTokens,
+                promptTokens + responseTokens,
+                0,
+                0,
+                0,
+                0.0,
+                0.0,
+                tokenCounter.contextWindow(),
+                tokenCounter.contextWindow(),
+                false,
+                false,
+                false,
+                false,
+                0,
+                0,
+                0,
+                null,
+                strategy.name(),
+                0,
+                0,
+                contextStrategyService.windowSize(),
+                conversationStore.getStoredMessageCount(activeSessionId));
+
+        return new AgentResponse(
+                refusal,
+                sessionId,
+                List.copyOf(logs),
+                tokenStats,
+                memorySnapshot,
+                List.of("SHORT → user: сохранено сообщение", "SHORT → assistant: отказ по инварианту"),
+                new UserProfileSnapshot(
+                        invariantContext.profile().displayName(),
+                        invariantContext.profile().responseStyle(),
+                        invariantContext.profile().responseFormat(),
+                        invariantContext.profile().constraints(),
+                        personalizationService.formatProfileBlock(invariantContext.profile()) != null),
+                List.of(),
+                taskSnapshot,
+                List.copyOf(taskStateLogs),
+                invariantsSnapshot,
+                List.copyOf(invariantLogs));
     }
 
     public void resetSession(String sessionId, String userId) {
@@ -329,6 +456,9 @@ public class ChatAgent {
         }
         if (assembled.taskBlock() != null && !assembled.taskBlock().isBlank()) {
             total += tokenCounter.estimateMessageTokens("system", assembled.taskBlock());
+        }
+        if (assembled.invariantsBlock() != null && !assembled.invariantsBlock().isBlank()) {
+            total += tokenCounter.estimateMessageTokens("system", assembled.invariantsBlock());
         }
         if (assembled.summary() != null && !assembled.summary().isBlank()) {
             total += contextCompressionService.estimateSummaryTokens(assembled.summary());

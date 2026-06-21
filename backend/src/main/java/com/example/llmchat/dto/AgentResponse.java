@@ -12,5 +12,7 @@ public record AgentResponse(
         UserProfileSnapshot profileSnapshot,
         List<String> personalizationLogs,
         TaskStateSnapshot taskStateSnapshot,
-        List<String> taskStateLogs) {
+        List<String> taskStateLogs,
+        InvariantsSnapshot invariantsSnapshot,
+        List<String> invariantLogs) {
 }
