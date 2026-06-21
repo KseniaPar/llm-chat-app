@@ -1,5 +1,6 @@
 package com.example.llmchat.agent;
 
+import com.example.llmchat.auth.SystemUserBootstrap;
 import com.example.llmchat.dto.AgentChatMessage;
 import com.example.llmchat.dto.AgentRequest;
 import com.example.llmchat.dto.AgentResponse;
@@ -42,7 +43,8 @@ public class SimulatorService {
         }
 
         AgentResponse agentResponse = chatAgent.run(
-                new AgentRequest(simulatorMessage.content(), sessionId));
+                new AgentRequest(simulatorMessage.content(), sessionId),
+                SystemUserBootstrap.SYSTEM_USER_ID);
 
         return new SimulatorTurnResponse(
                 simulatorMessage.content(),
@@ -87,7 +89,7 @@ public class SimulatorService {
 
     private String resolveSessionId(String sessionId) {
         if (sessionId == null || sessionId.isBlank() || !conversationStore.hasSession(sessionId)) {
-            return conversationStore.createSession();
+            return conversationStore.createDemoSession();
         }
         return sessionId;
     }

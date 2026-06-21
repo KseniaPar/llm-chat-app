@@ -1,5 +1,6 @@
 package com.example.llmchat.agent;
 
+import com.example.llmchat.auth.SystemUserBootstrap;
 import com.example.llmchat.dto.AgentChatMessage;
 import com.example.llmchat.dto.AgentRequest;
 import com.example.llmchat.dto.AgentResponse;
@@ -121,7 +122,7 @@ public class TokenDemoService {
 
         log.info("Сценарий переполнения: {} вызовов — накопление фрагментов длинного текста", overflowTurns);
 
-        String sessionId = conversationStore.createSession();
+        String sessionId = conversationStore.createDemoSession();
         List<TokenDemoStep> steps = new ArrayList<>();
         String liveError = null;
         Integer liveStatus = null;
@@ -136,7 +137,9 @@ public class TokenDemoService {
                 sink.accept(TokenScenarioStreamEvent.user(turn, prompt));
 
                 try {
-                    AgentResponse response = chatAgent.run(new AgentRequest(prompt, sessionId, false));
+                    AgentResponse response = chatAgent.run(
+                            new AgentRequest(prompt, sessionId, false),
+                            SystemUserBootstrap.SYSTEM_USER_ID);
                     sessionId = response.sessionId();
                     TokenDemoStep step = stepFromResponse(turn, response.tokens());
                     steps.add(step);
@@ -164,7 +167,7 @@ public class TokenDemoService {
             List<String> userPrompts,
             String label,
             Consumer<TokenScenarioStreamEvent> sink) {
-        String sessionId = conversationStore.createSession();
+        String sessionId = conversationStore.createDemoSession();
         List<TokenDemoStep> steps = new ArrayList<>();
 
         try {
@@ -176,7 +179,9 @@ public class TokenDemoService {
                 sink.accept(TokenScenarioStreamEvent.user(turn + 1, prompt));
 
                 try {
-                    AgentResponse response = chatAgent.run(new AgentRequest(prompt, sessionId, false));
+                    AgentResponse response = chatAgent.run(
+                            new AgentRequest(prompt, sessionId, false),
+                            SystemUserBootstrap.SYSTEM_USER_ID);
                     sessionId = response.sessionId();
                     TokenDemoStep step = stepFromResponse(turn + 1, response.tokens());
                     steps.add(step);

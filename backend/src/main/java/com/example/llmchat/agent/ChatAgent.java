@@ -3,7 +3,10 @@ package com.example.llmchat.agent;
 import com.example.llmchat.dto.AgentChatMessage;
 import com.example.llmchat.dto.AgentRequest;
 import com.example.llmchat.dto.AgentResponse;
+import com.example.llmchat.dto.MemoryContextSnapshot;
 import com.example.llmchat.dto.TokenStats;
+import com.example.llmchat.memory.ContextAssembler;
+import com.example.llmchat.memory.MemoryManager;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -15,6 +18,7 @@ import java.util.Map;
 public class ChatAgent {
 
     private static final double NEAR_LIMIT_RATIO = 0.85;
+    private static final ContextStrategy INTERNAL_STRATEGY = ContextStrategy.SLIDING_WINDOW;
 
     private final OpenRouterHttpClient openRouterHttpClient;
     private final ConversationStore conversationStore;
@@ -23,12 +27,11 @@ public class ChatAgent {
     private final ContextCompressionService contextCompressionService;
     private final ContextStrategyService contextStrategyService;
     private final FactsMemoryService factsMemoryService;
-    private final BranchingService branchingService;
+    private final ContextAssembler contextAssembler;
+    private final MemoryManager memoryManager;
     private final String model;
-    private final String systemPrompt;
     private final double temperature;
     private final int maxTokens;
-    private final boolean defaultCompressionEnabled;
 
     public ChatAgent(
             OpenRouterHttpClient openRouterHttpClient,
@@ -38,12 +41,11 @@ public class ChatAgent {
             ContextCompressionService contextCompressionService,
             ContextStrategyService contextStrategyService,
             FactsMemoryService factsMemoryService,
-            BranchingService branchingService,
+            ContextAssembler contextAssembler,
+            MemoryManager memoryManager,
             @Value("${app.openrouter.model}") String model,
-            @Value("${app.agent.system-prompt}") String systemPrompt,
             @Value("${app.agent.temperature}") double temperature,
-            @Value("${app.agent.max-tokens}") int maxTokens,
-            @Value("${app.agent.compression.enabled}") boolean defaultCompressionEnabled) {
+            @Value("${app.agent.max-tokens}") int maxTokens) {
         this.openRouterHttpClient = openRouterHttpClient;
         this.conversationStore = conversationStore;
         this.httpExchangeLogger = httpExchangeLogger;
@@ -51,78 +53,61 @@ public class ChatAgent {
         this.contextCompressionService = contextCompressionService;
         this.contextStrategyService = contextStrategyService;
         this.factsMemoryService = factsMemoryService;
-        this.branchingService = branchingService;
+        this.contextAssembler = contextAssembler;
+        this.memoryManager = memoryManager;
         this.model = model;
-        this.systemPrompt = systemPrompt;
         this.temperature = temperature;
         this.maxTokens = maxTokens;
-        this.defaultCompressionEnabled = defaultCompressionEnabled;
     }
 
-    public AgentResponse run(AgentRequest request) {
+    public AgentResponse run(AgentRequest request, String userId) {
         String prompt = request.prompt();
         if (prompt == null || prompt.isBlank()) {
             throw new IllegalArgumentException("Промпт не может быть пустым.");
         }
+        if (userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("userId обязателен.");
+        }
 
-        ContextStrategy strategy = ContextStrategy.fromString(request.contextStrategy());
-        boolean useDay10Strategy = strategy != null;
+        ContextStrategy strategy = INTERNAL_STRATEGY;
+        boolean useDay10Strategy = true;
+        boolean compressionEnabled = false;
 
-        boolean compressionEnabled = !useDay10Strategy && (request.compressionEnabled() != null
-                ? request.compressionEnabled()
-                : defaultCompressionEnabled);
-
-        String sessionId = resolveSessionId(request.sessionId(), strategy);
+        String sessionId = resolveSessionId(request.sessionId(), strategy, userId);
+        ensureSessionOwnership(sessionId, userId);
         contextStrategyService.ensureStrategy(sessionId, strategy);
 
-        if (strategy == ContextStrategy.BRANCHING && request.branchId() != null && !request.branchId().isBlank()) {
-            branchingService.switchBranch(sessionId, request.branchId());
-        }
+        String activeSessionId = sessionId;
 
-        String activeSessionId = strategy == ContextStrategy.BRANCHING
-                ? branchingService.resolveActiveSessionId(sessionId)
-                : sessionId;
-
-        String summary = useDay10Strategy ? null : conversationStore.getSummary(sessionId);
-        ContextStrategyService.PreparedContext preparedContext =
-                contextStrategyService.prepareContext(activeSessionId, strategy);
-        List<AgentChatMessage> history = preparedContext.messages();
-
-        List<OpenRouterHttpClient.ChatMessage> messages = buildMessages(
-                prompt, summary, history, preparedContext.factsBlock(), useDay10Strategy);
+        ContextAssembler.AssembledContext assembled =
+                contextAssembler.assemble(userId, activeSessionId, prompt, strategy, useDay10Strategy);
+        List<OpenRouterHttpClient.ChatMessage> messages = assembled.messages();
+        MemoryContextSnapshot memorySnapshot = assembled.memorySnapshot();
 
         int currentPromptTokens = tokenCounter.estimateTextTokens(prompt);
-        int historyTokens = estimateHistoryTokens(summary, history, preparedContext.factsBlock(), useDay10Strategy);
+        int historyTokens = estimateHistoryTokens(assembled);
         int requestTokensEstimate = tokenCounter.estimateMessagesTokens(messages);
         int contextLimit = tokenCounter.contextWindow();
-        int messagesInContext = preparedContext.messagesInContext()
-                + (preparedContext.factsBlock() != null ? 1 : 0)
-                + (!useDay10Strategy && summary != null && !summary.isBlank() ? 1 : 0);
+        int messagesInContext = assembled.messagesInContext()
+                + (assembled.factsBlock() != null ? 1 : 0)
+                + (assembled.summary() != null && !assembled.summary().isBlank() ? 1 : 0)
+                + (memorySnapshot.longTermInContext() != null && !memorySnapshot.longTermInContext().isEmpty() ? 1 : 0);
 
-        List<String> logs = new ArrayList<>();
-        if (useDay10Strategy) {
-            logs.add("Стратегия контекста: " + strategy.name());
-            logs.add("Окно: " + contextStrategyService.windowSize() + " сообщений");
-            if (preparedContext.messagesDropped() > 0) {
-                logs.add("Отброшено из контекста: " + preparedContext.messagesDropped() + " сообщений");
-            }
-            if (strategy == ContextStrategy.STICKY_FACTS) {
-                Map<String, String> facts = conversationStore.getFacts(activeSessionId);
-                logs.add("Фактов в памяти: " + facts.size());
-            }
-        } else {
-            logs.add("Сжатие истории: " + (compressionEnabled ? "включено" : "выключено"));
-            if (summary != null && !summary.isBlank()) {
-                logs.add("В контексте есть summary (~"
-                        + contextCompressionService.estimateSummaryTokens(summary) + " токенов)");
-            }
+        List<String> logs = new ArrayList<>(assembled.memoryLogs());
+        logs.add("Память: SHORT (окно) + WORKING (facts) + LONG (профиль)");
+        logs.add("Окно: " + contextStrategyService.windowSize() + " сообщений");
+        int stored = conversationStore.getStoredMessageCount(activeSessionId);
+        int dropped = Math.max(0, stored - assembled.messagesInContext());
+        if (dropped > 0) {
+            logs.add("Отброшено из контекста: " + dropped + " сообщений");
         }
+        logs.add("Фактов в WORKING: " + memorySnapshot.workingFactsInContext().size());
         logs.add("Токены — текущий запрос: ~" + currentPromptTokens);
         logs.add("Токены — история диалога: ~" + historyTokens + " (" + messagesInContext + " блоков)");
         logs.add("Токены — весь промпт (system + история + запрос): ~" + requestTokensEstimate
                 + " / лимит " + contextLimit);
 
-        httpExchangeLogger.logAgentContext(activeSessionId, history.size(), prompt);
+        httpExchangeLogger.logAgentContext(activeSessionId, assembled.messagesInContext(), prompt);
         httpExchangeLogger.logTokenEstimate(currentPromptTokens, historyTokens, requestTokensEstimate, contextLimit);
 
         boolean estimatedOverflow = tokenCounter.exceedsContextWindow(requestTokensEstimate);
@@ -144,22 +129,25 @@ public class ChatAgent {
                 : promptTokensActual + responseTokens;
 
         conversationStore.append(activeSessionId, "user", prompt);
-        Map<String, String> updatedFacts = contextStrategyService.afterUserMessage(activeSessionId, strategy, prompt);
+        List<String> memoryLogs = new ArrayList<>();
+        memoryLogs.add("SHORT → user: сохранено сообщение");
+
+        Map<String, String> updatedFacts = factsMemoryService.updateFacts(activeSessionId, prompt);
+        memoryManager.syncWorkingFacts(activeSessionId, updatedFacts);
+        memoryLogs.add("WORKING → facts: обновлено " + updatedFacts.size() + " записей (LLM)");
+
+        contextStrategyService.afterUserMessage(activeSessionId, strategy, prompt);
+
+        List<AgentChatMessage> recent = conversationStore.getStoredMessages(activeSessionId);
+        List<String> longTermLogs = memoryManager.extractAndStoreLongTerm(
+                userId, activeSessionId, prompt, recent);
+        memoryLogs.addAll(longTermLogs);
+
         conversationStore.append(activeSessionId, "assistant", answer);
+        memoryLogs.add("SHORT → assistant: сохранено сообщение");
+
         contextStrategyService.afterAssistantMessage(activeSessionId, strategy);
         conversationStore.addTokenUsage(activeSessionId, promptTokensActual, responseTokens);
-
-        ContextCompressionService.CompressionResult compressionResult =
-                ContextCompressionService.CompressionResult.notApplied();
-        if (!useDay10Strategy) {
-            compressionResult = contextCompressionService.compressIfNeeded(sessionId, compressionEnabled);
-            if (compressionResult.applied()) {
-                logs.add(String.format(
-                        "Сжатие: %d сообщений → summary (~%d токенов)",
-                        compressionResult.messagesSummarized(),
-                        compressionResult.summaryTokens()));
-            }
-        }
 
         ConversationStore.SessionTokenTotals sessionTotals = conversationStore.getTokenTotals(activeSessionId);
         double requestCostUsd = tokenCounter.calculateCostUsd(promptTokensActual, responseTokens);
@@ -179,10 +167,10 @@ public class ChatAgent {
 
         httpExchangeLogger.logTokenUsage(promptTokensActual, responseTokens, totalTokensActual, requestCostUsd);
 
-        Map<String, String> factsForStats = updatedFacts.isEmpty()
-                ? conversationStore.getFacts(activeSessionId)
-                : updatedFacts;
+        Map<String, String> factsForStats = updatedFacts;
         int factsTokens = factsMemoryService.estimateFactsTokens(factsForStats);
+
+        MemoryContextSnapshot finalSnapshot = memoryManager.buildContextSnapshot(userId, activeSessionId, strategy);
 
         TokenStats tokenStats = new TokenStats(
                 currentPromptTokens,
@@ -200,75 +188,55 @@ public class ChatAgent {
                 contextRemaining,
                 nearContextLimit,
                 contextOverflow,
-                compressionEnabled,
-                compressionResult.applied(),
-                compressionResult.summaryTokens(),
+                false,
+                false,
+                0,
                 messagesInContext,
-                compressionResult.messagesSummarized(),
-                compressionResult.summaryPreview(),
-                strategy != null ? strategy.name() : null,
+                0,
+                null,
+                strategy.name(),
                 factsTokens,
                 factsForStats.size(),
                 contextStrategyService.windowSize(),
-                preparedContext.messagesInStore());
+                conversationStore.getStoredMessageCount(activeSessionId));
 
-        return new AgentResponse(answer, sessionId, List.copyOf(logs), tokenStats);
+        return new AgentResponse(answer, sessionId, List.copyOf(logs), tokenStats, finalSnapshot, List.copyOf(memoryLogs));
     }
 
-    public void resetSession(String sessionId) {
+    public void resetSession(String sessionId, String userId) {
+        ensureSessionOwnership(sessionId, userId);
         conversationStore.clear(sessionId);
     }
 
-    private String resolveSessionId(String sessionId, ContextStrategy strategy) {
+    private String resolveSessionId(String sessionId, ContextStrategy strategy, String userId) {
         if (sessionId == null || sessionId.isBlank() || !conversationStore.hasSession(sessionId)) {
-            return conversationStore.createSession(strategy);
+            return conversationStore.createSession(userId, strategy);
         }
         return sessionId;
     }
 
-    private int estimateHistoryTokens(
-            String summary,
-            List<AgentChatMessage> history,
-            String factsBlock,
-            boolean useDay10Strategy) {
+    private void ensureSessionOwnership(String sessionId, String userId) {
+        if (!conversationStore.belongsToUser(sessionId, userId)) {
+            throw new IllegalArgumentException("Сессия не принадлежит пользователю.");
+        }
+    }
+
+    private int estimateHistoryTokens(ContextAssembler.AssembledContext assembled) {
         int total = 0;
-        if (!useDay10Strategy) {
-            total += contextCompressionService.estimateSummaryTokens(summary);
+        if (assembled.summary() != null && !assembled.summary().isBlank()) {
+            total += contextCompressionService.estimateSummaryTokens(assembled.summary());
         }
-        if (factsBlock != null && !factsBlock.isBlank()) {
-            total += tokenCounter.estimateMessageTokens("system", factsBlock);
+        if (assembled.factsBlock() != null && !assembled.factsBlock().isBlank()) {
+            total += tokenCounter.estimateMessageTokens("system", assembled.factsBlock());
         }
-        List<OpenRouterHttpClient.ChatMessage> historyMessages = history.stream()
+        String longTermBlock = memoryManager.formatLongTermBlock(assembled.memorySnapshot().longTermInContext());
+        if (longTermBlock != null) {
+            total += tokenCounter.estimateMessageTokens("system", longTermBlock);
+        }
+        List<OpenRouterHttpClient.ChatMessage> historyMessages = assembled.memorySnapshot().shortTermInContext().stream()
                 .map(entry -> new OpenRouterHttpClient.ChatMessage(entry.role(), entry.content()))
                 .toList();
         total += tokenCounter.estimateHistoryTokens(historyMessages);
         return total;
-    }
-
-    List<OpenRouterHttpClient.ChatMessage> buildMessages(
-            String prompt,
-            String summary,
-            List<AgentChatMessage> history,
-            String factsBlock,
-            boolean useDay10Strategy) {
-        List<OpenRouterHttpClient.ChatMessage> messages = new ArrayList<>();
-        messages.add(new OpenRouterHttpClient.ChatMessage("system", systemPrompt));
-
-        if (!useDay10Strategy) {
-            String summaryForContext = contextCompressionService.formatSummaryForContext(summary);
-            if (summaryForContext != null) {
-                messages.add(new OpenRouterHttpClient.ChatMessage("system", summaryForContext));
-            }
-        }
-
-        if (factsBlock != null && !factsBlock.isBlank()) {
-            messages.add(new OpenRouterHttpClient.ChatMessage("system", factsBlock));
-        }
-
-        for (AgentChatMessage entry : history) {
-            messages.add(new OpenRouterHttpClient.ChatMessage(entry.role(), entry.content()));
-        }
-        messages.add(new OpenRouterHttpClient.ChatMessage("user", prompt));
-        return messages;
     }
 }

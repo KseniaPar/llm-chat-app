@@ -1,9 +1,12 @@
 package com.example.llmchat.agent;
 
 import com.example.llmchat.dto.AgentChatMessage;
+import com.example.llmchat.memory.MemoryManager;
+import com.example.llmchat.memory.SqliteSessionRepository;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -14,39 +17,64 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
+@DependsOn("schemaInitializer")
 public class ConversationStore {
 
     private static final Logger log = LoggerFactory.getLogger(ConversationStore.class);
 
-    private final ConversationPersistence persistence;
+    private final SqliteSessionRepository sqliteSessionRepository;
+    private final MemoryManager memoryManager;
     private final ConcurrentHashMap<String, SessionState> sessions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> sessionUserIds = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, SessionTokenTotals> tokenTotals = new ConcurrentHashMap<>();
 
-    public ConversationStore(ConversationPersistence persistence) {
-        this.persistence = persistence;
+    public ConversationStore(SqliteSessionRepository sqliteSessionRepository, MemoryManager memoryManager) {
+        this.sqliteSessionRepository = sqliteSessionRepository;
+        this.memoryManager = memoryManager;
     }
 
     @PostConstruct
-    void loadFromDisk() {
-        Map<String, SessionState> loaded = persistence.load();
+    void loadFromDatabase() {
+        Map<String, SessionState> loaded = sqliteSessionRepository.loadAll();
         sessions.clear();
+        sessionUserIds.clear();
         tokenTotals.clear();
         sessions.putAll(loaded);
+        for (String sessionId : loaded.keySet()) {
+            sqliteSessionRepository.findById(sessionId).ifPresent(record -> sessionUserIds.put(sessionId, record.userId()));
+            tokenTotals.put(sessionId, new SessionTokenTotals());
+        }
         log.info("Загружено сессий диалога: {}", sessions.size());
     }
 
-    public String createSession() {
-        return createSession(null);
-    }
-
-    public String createSession(ContextStrategy strategy) {
+    public String createSession(String userId, ContextStrategy strategy) {
+        if (userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("userId обязателен.");
+        }
         String sessionId = UUID.randomUUID().toString();
         SessionState state = new SessionState();
         state.setContextStrategy(strategy);
         sessions.put(sessionId, state);
+        sessionUserIds.put(sessionId, userId);
         tokenTotals.put(sessionId, new SessionTokenTotals());
-        persist();
+        persist(sessionId);
         return sessionId;
+    }
+
+    public String createDemoSession(ContextStrategy strategy) {
+        return createSession(com.example.llmchat.auth.SystemUserBootstrap.SYSTEM_USER_ID, strategy);
+    }
+
+    public String createDemoSession() {
+        return createDemoSession(null);
+    }
+
+    public String getUserId(String sessionId) {
+        return sessionUserIds.get(sessionId);
+    }
+
+    public boolean belongsToUser(String sessionId, String userId) {
+        return userId != null && userId.equals(sessionUserIds.get(sessionId));
     }
 
     public boolean hasSession(String sessionId) {
@@ -333,6 +361,7 @@ public class ConversationStore {
             branchState.setBranches(new ArrayList<>());
 
             sessions.put(branchSessionId, branchState);
+            sessionUserIds.put(branchSessionId, sessionUserIds.get(sessionId));
             tokenTotals.putIfAbsent(branchSessionId, new SessionTokenTotals());
             branches.add(new BranchInfo(branchId, label, branchSessionId));
         }
@@ -426,13 +455,25 @@ public class ConversationStore {
     public void clear(String sessionId) {
         if (sessionId != null) {
             sessions.remove(sessionId);
+            sessionUserIds.remove(sessionId);
             tokenTotals.remove(sessionId);
-            persist();
+            sqliteSessionRepository.delete(sessionId);
         }
     }
 
+    private void persist(String sessionId) {
+        SessionState state = sessions.get(sessionId);
+        String userId = sessionUserIds.get(sessionId);
+        if (state == null || userId == null) {
+            return;
+        }
+        memoryManager.syncLayers(sessionId, userId, state);
+    }
+
     private void persist() {
-        persistence.save(sessions);
+        for (String sessionId : sessions.keySet()) {
+            persist(sessionId);
+        }
     }
 
     public static final class SessionTokenTotals {

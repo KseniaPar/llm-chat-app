@@ -1,5 +1,6 @@
 package com.example.llmchat.agent;
 
+import com.example.llmchat.auth.SystemUserBootstrap;
 import com.example.llmchat.dto.AgentRequest;
 import com.example.llmchat.dto.AgentResponse;
 import com.example.llmchat.dto.BranchInfoDto;
@@ -73,7 +74,7 @@ public class StrategyCompareService {
         String mode = strategy.name().toLowerCase();
         sink.accept(TokenScenarioStreamEvent.strategyStart(mode, title, tokenCounter.contextWindow()));
 
-        String sessionId = conversationStore.createSession(strategy);
+        String sessionId = conversationStore.createDemoSession(strategy);
         List<TokenDemoStep> steps = new ArrayList<>();
         List<Map<String, String>> factsSnapshots = new ArrayList<>();
         String probeAnswer = null;
@@ -92,7 +93,8 @@ public class StrategyCompareService {
 
                 try {
                     AgentResponse response = chatAgent.run(new AgentRequest(
-                            prompt, sessionId, false, strategy.name(), null));
+                            prompt, sessionId, false, strategy.name(), null),
+                            SystemUserBootstrap.SYSTEM_USER_ID);
                     sessionId = response.sessionId();
                     TokenStats stats = response.tokens();
                     steps.add(stepFromResponse(turn, stats));
@@ -156,7 +158,7 @@ public class StrategyCompareService {
         String title = "Branching";
         sink.accept(TokenScenarioStreamEvent.strategyStart(mode, title, tokenCounter.contextWindow()));
 
-        String sessionId = conversationStore.createSession(ContextStrategy.BRANCHING);
+        String sessionId = conversationStore.createDemoSession(ContextStrategy.BRANCHING);
         List<TokenDemoStep> steps = new ArrayList<>();
         String probeAnswer = null;
         String finalAnswer = null;
@@ -173,7 +175,8 @@ public class StrategyCompareService {
 
                 try {
                     AgentResponse response = chatAgent.run(new AgentRequest(
-                            prompt, sessionId, false, ContextStrategy.BRANCHING.name(), null));
+                            prompt, sessionId, false, ContextStrategy.BRANCHING.name(), null),
+                            SystemUserBootstrap.SYSTEM_USER_ID);
                     sessionId = response.sessionId();
                     steps.add(stepFromResponse(turn, response.tokens()));
                     sink.accept(TokenScenarioStreamEvent.turn(turn, response.response(), steps.get(steps.size() - 1)));
@@ -212,7 +215,8 @@ public class StrategyCompareService {
 
                     try {
                         AgentResponse responseA = chatAgent.run(new AgentRequest(
-                                promptA, sessionId, false, ContextStrategy.BRANCHING.name(), branches.get(0).branchId()));
+                                promptA, sessionId, false, ContextStrategy.BRANCHING.name(), branches.get(0).branchId()),
+                                SystemUserBootstrap.SYSTEM_USER_ID);
 
                         steps.add(stepFromResponse(turn, responseA.tokens()));
 
