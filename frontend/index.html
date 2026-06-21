@@ -3,137 +3,127 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 10 — Управление контекстом: стратегии</title>
+  <title>День 11 — Модель памяти ассистента</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <main class="app">
+  <div id="auth-overlay" class="auth-overlay">
+    <section class="auth-card">
+      <h2 class="auth-card__title">Вход в платформу</h2>
+      <p class="auth-card__desc">День 11 — stateful агент с тремя слоями памяти</p>
+      <div class="auth-card__tabs">
+        <button id="auth-tab-login" class="auth-card__tab auth-card__tab--active" type="button">Вход</button>
+        <button id="auth-tab-register" class="auth-card__tab" type="button">Регистрация</button>
+      </div>
+      <form id="auth-form" class="auth-card__form">
+        <label class="auth-card__label">
+          Имя пользователя
+          <input id="auth-username" class="auth-card__input" type="text" autocomplete="username" required>
+        </label>
+        <label class="auth-card__label">
+          Пароль
+          <input id="auth-password" class="auth-card__input" type="password" autocomplete="current-password" required>
+        </label>
+        <p id="auth-error" class="auth-card__error hidden" role="alert"></p>
+        <button id="auth-submit" class="auth-card__submit" type="submit">Войти</button>
+      </form>
+    </section>
+  </div>
+
+  <main class="app hidden" id="app-main">
     <div class="app__top">
-    <section class="chat-shell">
-      <header class="chat-header">
-        <div class="chat-header__top">
-          <div class="chat-header__avatar" aria-hidden="true">AI</div>
-          <div class="chat-header__info">
-            <h1>Агент</h1>
-            <p>День 10 — стратегии контекста (без summary)</p>
+      <section class="chat-shell">
+        <header class="chat-header">
+          <div class="chat-header__top">
+            <div class="chat-header__avatar" aria-hidden="true">AI</div>
+            <div class="chat-header__info">
+              <h1>Агент</h1>
+              <p>День 11 — память: SHORT / WORKING / LONG</p>
+            </div>
+            <span id="auth-user-label" class="chat-header__user"></span>
+            <span id="loading" class="chat-header__status hidden" aria-live="polite">
+              <span class="typing-dots"><span></span><span></span><span></span></span>
+              печатает
+            </span>
+            <button id="new-dialog-btn" class="chat-header__action" type="button" title="Очистить чат и начать заново">Новый диалог</button>
+            <button id="logout-btn" class="chat-header__action" type="button" title="Выйти">Выйти</button>
           </div>
-          <span id="loading" class="chat-header__status hidden" aria-live="polite">
-            <span class="typing-dots"><span></span><span></span><span></span></span>
-            печатает
-          </span>
-          <button id="compression-toggle-btn" class="chat-header__action chat-header__action--active" type="button" title="Сжимать историю каждые 10 сообщений (Day 9)">Сжатие: вкл</button>
-          <button id="new-dialog-btn" class="chat-header__action" type="button" title="Очистить чат и начать заново">Новый диалог</button>
-        </div>
-        <div class="chat-header__strategies" role="group" aria-label="Стратегия контекста">
-          <span class="chat-header__strategies-label">Стратегия:</span>
-          <button id="strategy-window-btn" class="chat-header__action chat-header__action--active" type="button" data-strategy="SLIDING_WINDOW" title="Только последние N сообщений">Окно</button>
-          <button id="strategy-facts-btn" class="chat-header__action" type="button" data-strategy="STICKY_FACTS" title="Facts KV + последние N сообщений">Факты</button>
-          <button id="strategy-branch-btn" class="chat-header__action" type="button" data-strategy="BRANCHING" title="Ветки диалога от checkpoint">Ветки</button>
-        </div>
-        <div id="branch-controls" class="chat-header__branch hidden">
-          <button id="branch-checkpoint-btn" class="chat-header__action" type="button" title="Сохранить checkpoint для ветвления">Checkpoint</button>
-          <button id="branch-create-btn" class="chat-header__action" type="button" disabled title="Создать 2 ветки от checkpoint">2 ветки</button>
-          <div id="branch-tabs" class="branch-tabs" role="tablist"></div>
-        </div>
-        <div class="chat-header__scenarios">
-          <button id="scenario-short-btn" class="chat-header__action" type="button" title="4 вызова API">Маленький диалог</button>
-          <button id="scenario-long-btn" class="chat-header__action" type="button" title="20 вызовов API — показывает рост истории и токенов">Большой диалог</button>
-          <button id="scenario-overflow-btn" class="chat-header__action" type="button" title="5 вызовов — фрагменты длинного текста, переполнение на последнем">Переполнение</button>
-          <button id="compare-compression-btn" class="chat-header__action" type="button" title="Сравнить один диалог без сжатия и со сжатием (Day 9)">Сравнить сжатие</button>
-          <button id="compare-strategies-btn" class="chat-header__action" type="button" title="Сравнить 3 стратегии на сценарии «Сбор ТЗ»">Сравнить стратегии</button>
-        </div>
-      </header>
+        </header>
 
-      <div id="messages" class="messages" aria-live="polite">
-        <div class="messages-empty">
-          <div class="messages-empty__icon" aria-hidden="true">💬</div>
-          <p>Начните диалог или выберите сценарий сверху</p>
+        <div id="messages" class="messages" aria-live="polite">
+          <div class="messages-empty">
+            <div class="messages-empty__icon" aria-hidden="true">💬</div>
+            <p>Начните диалог — агент запомнит контекст в трёх слоях памяти</p>
+          </div>
         </div>
-      </div>
 
-      <div id="error" class="error hidden" role="alert"></div>
+        <div id="error" class="error hidden" role="alert"></div>
 
-      <footer class="composer">
-        <textarea
-          id="prompt"
-          class="composer__input"
-          rows="1"
-          placeholder="Напишите сообщение..."
-        ></textarea>
-        <button id="send-btn" class="composer__send" type="button" aria-label="Отправить">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M22 2 11 13"></path>
-            <path d="M22 2 15 22 11 13 2 9 22 2"></path>
-          </svg>
-        </button>
-      </footer>
-    </section>
+        <footer class="composer">
+          <textarea
+            id="prompt"
+            class="composer__input"
+            rows="1"
+            placeholder="Напишите сообщение..."
+          ></textarea>
+          <button id="send-btn" class="composer__send" type="button" aria-label="Отправить">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M22 2 11 13"></path>
+              <path d="M22 2 15 22 11 13 2 9 22 2"></path>
+            </svg>
+          </button>
+        </footer>
+      </section>
 
-    <aside id="stats-panel" class="stats-panel hidden" aria-live="polite">
-      <h2 class="stats-panel__title">Статистика</h2>
-      <div class="token-panel__grid token-panel__grid--sidebar">
-        <div class="token-stat">
-          <span class="token-stat__label">Текущий запрос</span>
-          <span id="token-current" class="token-stat__value">—</span>
+      <aside id="stats-panel" class="stats-panel hidden" aria-live="polite">
+        <h2 class="stats-panel__title">Статистика</h2>
+        <div class="token-panel__grid token-panel__grid--sidebar">
+          <div class="token-stat">
+            <span class="token-stat__label">Текущий запрос</span>
+            <span id="token-current" class="token-stat__value">—</span>
+          </div>
+          <div class="token-stat">
+            <span class="token-stat__label">История</span>
+            <span id="token-history" class="token-stat__value">—</span>
+          </div>
+          <div class="token-stat">
+            <span class="token-stat__label">Ответ модели</span>
+            <span id="token-response" class="token-stat__value">—</span>
+          </div>
+          <div class="token-stat">
+            <span class="token-stat__label">Сессия</span>
+            <span id="token-session" class="token-stat__value">—</span>
+          </div>
+          <div class="token-stat token-stat--wide">
+            <span class="token-stat__label">Стоимость сессии</span>
+            <span id="token-cost" class="token-stat__value">—</span>
+          </div>
+          <div class="token-stat token-stat--wide">
+            <span class="token-stat__label">Окно контекста</span>
+            <span id="token-context" class="token-stat__value">—</span>
+          </div>
         </div>
-        <div class="token-stat">
-          <span class="token-stat__label">История</span>
-          <span id="token-history" class="token-stat__value">—</span>
+        <div id="token-bar" class="token-bar hidden">
+          <div id="token-bar-fill" class="token-bar__fill"></div>
         </div>
-        <div class="token-stat">
-          <span class="token-stat__label">Ответ модели</span>
-          <span id="token-response" class="token-stat__value">—</span>
+        <p id="token-warning" class="token-panel__warning hidden"></p>
+        <div id="memory-panel" class="memory-panel">
+          <h3 class="memory-panel__title">Память агента</h3>
+          <div class="memory-panel__tabs" role="tablist">
+            <button type="button" class="memory-panel__tab memory-panel__tab--active" data-memory-tab="short">Краткосрочная</button>
+            <button type="button" class="memory-panel__tab" data-memory-tab="working">Рабочая</button>
+            <button type="button" class="memory-panel__tab" data-memory-tab="long">Долговременная</button>
+          </div>
+          <div id="memory-tab-short" class="memory-panel__content"></div>
+          <div id="memory-tab-working" class="memory-panel__content hidden"></div>
+          <div id="memory-tab-long" class="memory-panel__content hidden"></div>
+          <div id="memory-logs" class="memory-panel__logs"></div>
         </div>
-        <div class="token-stat">
-          <span class="token-stat__label">Сессия</span>
-          <span id="token-session" class="token-stat__value">—</span>
-        </div>
-        <div class="token-stat token-stat--wide">
-          <span class="token-stat__label">Стоимость сессии</span>
-          <span id="token-cost" class="token-stat__value">—</span>
-        </div>
-        <div class="token-stat token-stat--wide">
-          <span class="token-stat__label">Окно контекста</span>
-          <span id="token-context" class="token-stat__value">—</span>
-        </div>
-      </div>
-      <div id="token-bar" class="token-bar hidden">
-        <div id="token-bar-fill" class="token-bar__fill"></div>
-      </div>
-      <p id="token-warning" class="token-panel__warning hidden"></p>
-      <p id="compression-info" class="token-panel__warning hidden"></p>
-      <p id="strategy-info" class="token-panel__warning hidden"></p>
-      <div id="facts-panel" class="facts-panel hidden">
-        <h3 class="facts-panel__title">Facts (KV)</h3>
-        <div id="facts-table" class="facts-panel__table"></div>
-      </div>
-    </aside>
+      </aside>
     </div>
-
-    <section id="scenario-table-panel" class="scenario-table-panel hidden" aria-live="polite">
-      <h2 class="scenario-table-panel__title">Шаги сценария</h2>
-      <div id="scenario-table" class="scenario-table-panel__table"></div>
-    </section>
-
-    <section id="compare-panel" class="compare-panel hidden" aria-live="polite">
-      <div class="compare-panel__header">
-        <div>
-          <h2 id="compare-panel-title">Сравнение</h2>
-          <p id="compare-panel-desc">Результаты сравнения</p>
-        </div>
-      </div>
-      <div class="compare-panel__content">
-        <div id="compare-summary" class="compare-card hidden"></div>
-        <div id="compare-raw-card" class="compare-card hidden"></div>
-        <div id="compare-compressed-card" class="compare-card hidden"></div>
-        <div id="compare-strategy-sliding" class="compare-card hidden"></div>
-        <div id="compare-strategy-facts" class="compare-card hidden"></div>
-        <div id="compare-strategy-branching" class="compare-card hidden"></div>
-      </div>
-    </section>
   </main>
 
   <script type="module" src="/js/app.js"></script>
