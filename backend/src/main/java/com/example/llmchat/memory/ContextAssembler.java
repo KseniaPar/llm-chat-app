@@ -6,8 +6,11 @@ import com.example.llmchat.agent.OpenRouterHttpClient;
 import com.example.llmchat.dto.AgentChatMessage;
 import com.example.llmchat.dto.MemoryContextSnapshot;
 import com.example.llmchat.dto.UserProfileSnapshot;
+import com.example.llmchat.dto.TaskStateSnapshot;
 import com.example.llmchat.personalization.PersonalizationService;
 import com.example.llmchat.personalization.UserProfile;
+import com.example.llmchat.task.TaskState;
+import com.example.llmchat.task.TaskStateService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -21,16 +24,19 @@ public class ContextAssembler {
     private final MemoryManager memoryManager;
     private final ContextCompressionService contextCompressionService;
     private final PersonalizationService personalizationService;
+    private final TaskStateService taskStateService;
     private final String systemPrompt;
 
     public ContextAssembler(
             MemoryManager memoryManager,
             ContextCompressionService contextCompressionService,
             PersonalizationService personalizationService,
+            TaskStateService taskStateService,
             @Value("${app.agent.system-prompt}") String systemPrompt) {
         this.memoryManager = memoryManager;
         this.contextCompressionService = contextCompressionService;
         this.personalizationService = personalizationService;
+        this.taskStateService = taskStateService;
         this.systemPrompt = systemPrompt;
     }
 
@@ -59,6 +65,15 @@ public class ContextAssembler {
                 profile.responseFormat(),
                 profile.constraints(),
                 profileApplied);
+
+        TaskState taskState = taskStateService.getState(sessionId).orElse(null);
+        String taskBlock = taskStateService.formatTaskBlock(taskState);
+        boolean taskApplied = taskBlock != null;
+        List<String> taskStateLogs = taskStateService.buildTaskStateLogs(taskState, taskApplied);
+        if (taskApplied) {
+            messages.add(new OpenRouterHttpClient.ChatMessage("system", taskBlock));
+        }
+        TaskStateSnapshot taskStateSnapshot = taskStateService.toSnapshot(taskState, taskApplied);
 
         String longTermBlock = memoryManager.formatLongTermBlock(snapshot.longTermInContext());
         if (longTermBlock != null) {
@@ -103,7 +118,10 @@ public class ContextAssembler {
                 snapshot.workingSummaryInContext(),
                 profileBlock,
                 profileSnapshot,
-                personalizationLogs);
+                personalizationLogs,
+                taskBlock,
+                taskStateSnapshot,
+                taskStateLogs);
     }
 
     public record AssembledContext(
@@ -115,6 +133,9 @@ public class ContextAssembler {
             String summary,
             String profileBlock,
             UserProfileSnapshot profileSnapshot,
-            List<String> personalizationLogs) {
+            List<String> personalizationLogs,
+            String taskBlock,
+            TaskStateSnapshot taskStateSnapshot,
+            List<String> taskStateLogs) {
     }
 }
