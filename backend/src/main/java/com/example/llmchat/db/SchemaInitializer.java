@@ -113,6 +113,18 @@ public class SchemaInitializer {
                 )
                 """);
 
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS session_task_state (
+                    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+                    phase TEXT NOT NULL,
+                    current_step TEXT NOT NULL,
+                    expected_action TEXT NOT NULL,
+                    paused INTEGER NOT NULL DEFAULT 0,
+                    task_title TEXT,
+                    updated_at TEXT NOT NULL
+                )
+                """);
+
         log.info("SQLite schema initialized at {}", databasePath);
     }
 }

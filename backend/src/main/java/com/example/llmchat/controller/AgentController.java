@@ -10,7 +10,13 @@ import com.example.llmchat.dto.AgentRequest;
 import com.example.llmchat.dto.AgentResetRequest;
 import com.example.llmchat.dto.AgentResponse;
 import com.example.llmchat.dto.MemorySnapshotResponse;
+import com.example.llmchat.dto.InvariantDto;
+import com.example.llmchat.dto.TaskSessionRequest;
+import com.example.llmchat.dto.TaskStateResponse;
+import com.example.llmchat.invariants.InvariantsService;
 import com.example.llmchat.memory.MemoryManager;
+import com.example.llmchat.task.TaskState;
+import com.example.llmchat.task.TaskStateService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +25,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/agent")
@@ -29,11 +37,20 @@ public class AgentController {
     private final ChatAgent chatAgent;
     private final ConversationStore conversationStore;
     private final MemoryManager memoryManager;
+    private final TaskStateService taskStateService;
+    private final InvariantsService invariantsService;
 
-    public AgentController(ChatAgent chatAgent, ConversationStore conversationStore, MemoryManager memoryManager) {
+    public AgentController(
+            ChatAgent chatAgent,
+            ConversationStore conversationStore,
+            MemoryManager memoryManager,
+            TaskStateService taskStateService,
+            InvariantsService invariantsService) {
         this.chatAgent = chatAgent;
         this.conversationStore = conversationStore;
         this.memoryManager = memoryManager;
+        this.taskStateService = taskStateService;
+        this.invariantsService = invariantsService;
     }
 
     @PostMapping("/chat")
@@ -86,5 +103,57 @@ public class AgentController {
             throw new IllegalArgumentException("Сессия не принадлежит пользователю.");
         }
         return memoryManager.getMemorySnapshot(user.userId(), sessionId);
+    }
+
+    @GetMapping("/invariants")
+    public List<InvariantDto> invariants() {
+        AuthContext.requireUser();
+        return invariantsService.allDtos();
+    }
+
+    @GetMapping("/task")
+    public TaskStateResponse task(@RequestParam String sessionId) {
+        AuthenticatedUser user = AuthContext.requireUser();
+        ensureSessionAccess(sessionId, user.userId());
+        return toTaskResponse(taskStateService.getState(sessionId).orElse(null));
+    }
+
+    @PostMapping("/task/pause")
+    public TaskStateResponse pauseTask(@RequestBody TaskSessionRequest request) {
+        AuthenticatedUser user = AuthContext.requireUser();
+        ensureSessionAccess(request.sessionId(), user.userId());
+        log.info("POST /api/agent/task/pause — user: {}, sessionId: {}", user.username(), request.sessionId());
+        return toTaskResponse(taskStateService.pause(request.sessionId()));
+    }
+
+    @PostMapping("/task/resume")
+    public TaskStateResponse resumeTask(@RequestBody TaskSessionRequest request) {
+        AuthenticatedUser user = AuthContext.requireUser();
+        ensureSessionAccess(request.sessionId(), user.userId());
+        log.info("POST /api/agent/task/resume — user: {}, sessionId: {}", user.username(), request.sessionId());
+        return toTaskResponse(taskStateService.resume(request.sessionId()));
+    }
+
+    private void ensureSessionAccess(String sessionId, String userId) {
+        if (sessionId == null || sessionId.isBlank() || !conversationStore.hasSession(sessionId)) {
+            throw new IllegalArgumentException("Сессия не найдена.");
+        }
+        if (!conversationStore.belongsToUser(sessionId, userId)) {
+            throw new IllegalArgumentException("Сессия не принадлежит пользователю.");
+        }
+    }
+
+    private TaskStateResponse toTaskResponse(TaskState state) {
+        if (state == null) {
+            return new TaskStateResponse(null, null, null, null, null, false, false);
+        }
+        return new TaskStateResponse(
+                state.phase().id(),
+                state.phase().displayLabel(),
+                state.currentStep(),
+                state.expectedAction(),
+                state.taskTitle(),
+                state.paused(),
+                true);
     }
 }

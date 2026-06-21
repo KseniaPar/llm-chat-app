@@ -37,6 +37,18 @@ const profileResponseFormat = document.getElementById('profile-response-format')
 const profileConstraints = document.getElementById('profile-constraints');
 const profileActiveSummary = document.getElementById('profile-active-summary');
 const profileStatus = document.getElementById('profile-status');
+const taskPanel = document.getElementById('task-panel');
+const taskPanelEmpty = document.getElementById('task-panel-empty');
+const taskPanelContent = document.getElementById('task-panel-content');
+const taskPhaseBadge = document.getElementById('task-phase-badge');
+const taskTitleEl = document.getElementById('task-title');
+const taskCurrentStep = document.getElementById('task-current-step');
+const taskExpectedAction = document.getElementById('task-expected-action');
+const taskPausedLabel = document.getElementById('task-paused-label');
+const taskPauseBtn = document.getElementById('task-pause-btn');
+const taskResumeBtn = document.getElementById('task-resume-btn');
+const invariantsList = document.getElementById('invariants-list');
+const invariantsCountBadge = document.getElementById('invariants-count-badge');
 
 const CHAR_DELAY_MS = 18;
 const SESSION_STORAGE_KEY = 'llm-chat-session-id';
@@ -142,7 +154,7 @@ async function handleAuthSubmit(event) {
     localStorage.setItem(JWT_STORAGE_KEY, authToken);
     localStorage.setItem(AUTH_USER_STORAGE_KEY, authUsernameValue);
     hideAuthOverlay();
-    await Promise.all([restoreSessionFromStorage(), loadProfile()]);
+    await Promise.all([restoreSessionFromStorage(), loadProfile(), loadTaskState(), loadInvariants()]);
     promptInput?.focus();
   } catch (error) {
     if (authError) {
@@ -170,7 +182,7 @@ function escapeHtml(text) {
     .replaceAll('"', '&quot;');
 }
 
-function renderMemoryPanel(snapshot, logs, personalizationLogs, profileSnapshot) {
+function renderMemoryPanel(snapshot, logs, personalizationLogs, profileSnapshot, taskStateLogs, invariantLogs) {
   if (!memoryPanel) return;
   memoryPanel.classList.remove('hidden');
 
@@ -216,7 +228,7 @@ function renderMemoryPanel(snapshot, logs, personalizationLogs, profileSnapshot)
     .join('');
   memoryTabLong.innerHTML = longHtml || '<p>Нет долговременных данных</p>';
 
-  const allLogs = [...(personalizationLogs || []), ...(logs || [])];
+  const allLogs = [...(invariantLogs || []), ...(taskStateLogs || []), ...(personalizationLogs || []), ...(logs || [])];
   if (memoryLogsEl) {
     if (profileSnapshot?.appliedToPrompt) {
       allLogs.unshift('Активный профиль применён к запросу');
@@ -224,6 +236,108 @@ function renderMemoryPanel(snapshot, logs, personalizationLogs, profileSnapshot)
     memoryLogsEl.innerHTML = allLogs.length
       ? allLogs.map((line) => `<div>${escapeHtml(line)}</div>`).join('')
       : '';
+  }
+}
+
+function renderTaskPanel(task) {
+  if (!taskPanel) return;
+  const active = task?.active;
+  if (!active) {
+    taskPanelEmpty?.classList.remove('hidden');
+    taskPanelContent?.classList.add('hidden');
+    return;
+  }
+  taskPanelEmpty?.classList.add('hidden');
+  taskPanelContent?.classList.remove('hidden');
+  if (taskPhaseBadge) {
+    taskPhaseBadge.textContent = task.phaseLabel || task.phase || '—';
+    taskPhaseBadge.className = `task-panel__phase task-panel__phase--${task.phase || 'planning'}`;
+  }
+  if (taskTitleEl) {
+    taskTitleEl.textContent = task.taskTitle || '';
+    taskTitleEl.classList.toggle('hidden', !task.taskTitle);
+  }
+  if (taskCurrentStep) taskCurrentStep.textContent = task.currentStep || '—';
+  if (taskExpectedAction) taskExpectedAction.textContent = task.expectedAction || '—';
+  const paused = !!task.paused;
+  taskPausedLabel?.classList.toggle('hidden', !paused);
+  taskPauseBtn?.classList.toggle('hidden', paused);
+  taskResumeBtn?.classList.toggle('hidden', !paused);
+}
+
+async function loadTaskState() {
+  if (!sessionId || !getAuthToken()) {
+    renderTaskPanel(null);
+    return;
+  }
+  try {
+    const response = await apiFetch(`/api/agent/task?sessionId=${encodeURIComponent(sessionId)}`);
+    if (!response.ok) return;
+    const data = await response.json();
+    renderTaskPanel(data.active ? data : null);
+  } catch {
+    // optional
+  }
+}
+
+function renderInvariantsPanel(rules) {
+  if (!invariantsList) return;
+  const items = rules || [];
+  if (invariantsCountBadge) {
+    invariantsCountBadge.textContent = String(items.length);
+  }
+  invariantsList.innerHTML = items.length
+    ? items
+        .map(
+          (rule) => `<li class="invariants-panel__item">
+          <div class="invariants-panel__head">
+            <span class="invariants-panel__id">${escapeHtml(rule.id)}</span>
+            ${rule.hardBlock ? '<span class="invariants-panel__tag">hard</span>' : ''}
+          </div>
+          <strong class="invariants-panel__name">${escapeHtml(rule.title)}</strong>
+          <p class="invariants-panel__desc">${escapeHtml(rule.description || '')}</p>
+        </li>`,
+        )
+        .join('')
+    : '<li class="invariants-panel__empty">Нет правил</li>';
+}
+
+async function loadInvariants() {
+  if (!getAuthToken()) return;
+  try {
+    const response = await apiFetch('/api/agent/invariants');
+    if (!response.ok) return;
+    renderInvariantsPanel(await response.json());
+  } catch {
+    // optional
+  }
+}
+
+async function pauseTask() {
+  if (!sessionId) return;
+  try {
+    const response = await apiFetch('/api/agent/task/pause', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    });
+    if (!response.ok) throw new Error(await parseErrorResponse(response));
+    renderTaskPanel(await response.json());
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function resumeTask() {
+  if (!sessionId) return;
+  try {
+    const response = await apiFetch('/api/agent/task/resume', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    });
+    if (!response.ok) throw new Error(await parseErrorResponse(response));
+    renderTaskPanel(await response.json());
+  } catch (error) {
+    showError(error.message);
   }
 }
 
@@ -314,6 +428,8 @@ async function loadMemoryPanel() {
       data.memoryLogs || [],
       [],
       null,
+      [],
+      [],
     );
   } catch {
     // optional
@@ -381,6 +497,7 @@ async function restoreSessionFromStorage() {
       appendMessage(role, message.content);
     }
     await loadMemoryPanel();
+    await loadTaskState();
   } catch {
     sessionId = savedSessionId;
   }
@@ -557,6 +674,7 @@ async function startNewDialog() {
   if (memoryTabWorking) memoryTabWorking.innerHTML = '';
   if (memoryTabLong) memoryTabLong.innerHTML = '';
   if (memoryLogsEl) memoryLogsEl.innerHTML = '';
+  renderTaskPanel(null);
 
   if (previousSessionId) {
     try {
@@ -599,9 +717,24 @@ async function sendMessage(prompt) {
         data.memoryLogs || [],
         data.personalizationLogs || [],
         data.profileSnapshot || null,
+        data.taskStateLogs || [],
+        data.invariantLogs || [],
       );
     } else {
       await loadMemoryPanel();
+    }
+    if (data.invariantsSnapshot?.rules?.length) {
+      renderInvariantsPanel(data.invariantsSnapshot.rules);
+    } else {
+      await loadInvariants();
+    }
+    if (data.taskStateSnapshot) {
+      renderTaskPanel({
+        ...data.taskStateSnapshot,
+        active: data.taskStateSnapshot.active,
+      });
+    } else {
+      await loadTaskState();
     }
 
     setLoading(false);
@@ -647,6 +780,8 @@ authForm?.addEventListener('submit', handleAuthSubmit);
 authTabLogin?.addEventListener('click', () => setAuthMode('login'));
 authTabRegister?.addEventListener('click', () => setAuthMode('register'));
 profileForm?.addEventListener('submit', saveProfile);
+taskPauseBtn?.addEventListener('click', pauseTask);
+taskResumeBtn?.addEventListener('click', resumeTask);
 promptInput.addEventListener('input', resizeInput);
 promptInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
@@ -660,7 +795,9 @@ resizeInput();
 
 if (getAuthToken()) {
   hideAuthOverlay();
-  Promise.all([restoreSessionFromStorage(), loadProfile()]).finally(() => promptInput.focus());
+  Promise.all([restoreSessionFromStorage(), loadProfile(), loadTaskState(), loadInvariants()]).finally(() =>
+    promptInput.focus(),
+  );
 } else {
   showAuthOverlay();
 }
