@@ -30,6 +30,13 @@ const memoryTabShort = document.getElementById('memory-tab-short');
 const memoryTabWorking = document.getElementById('memory-tab-working');
 const memoryTabLong = document.getElementById('memory-tab-long');
 const memoryLogsEl = document.getElementById('memory-logs');
+const profileForm = document.getElementById('profile-form');
+const profileDisplayName = document.getElementById('profile-display-name');
+const profileResponseStyle = document.getElementById('profile-response-style');
+const profileResponseFormat = document.getElementById('profile-response-format');
+const profileConstraints = document.getElementById('profile-constraints');
+const profileActiveSummary = document.getElementById('profile-active-summary');
+const profileStatus = document.getElementById('profile-status');
 
 const CHAR_DELAY_MS = 18;
 const SESSION_STORAGE_KEY = 'llm-chat-session-id';
@@ -42,17 +49,46 @@ let authUsernameValue = localStorage.getItem(AUTH_USER_STORAGE_KEY);
 let activeRequestId = 0;
 let sessionId = null;
 
-function getAuthHeaders() {
-  const headers = { 'Content-Type': 'application/json' };
-  if (authToken) {
-    headers.Authorization = `Bearer ${authToken}`;
+function getAuthToken() {
+  const stored = localStorage.getItem(JWT_STORAGE_KEY);
+  if (stored && stored !== 'null' && stored !== 'undefined') {
+    authToken = stored;
+    return stored;
+  }
+  authToken = null;
+  return null;
+}
+
+function getAuthHeaders(extraHeaders = {}) {
+  const headers = { ...extraHeaders };
+  if (!headers['Content-Type'] && !headers['content-type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const token = getAuthToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
   }
   return headers;
 }
 
 async function apiFetch(url, options = {}) {
-  const headers = { ...getAuthHeaders(), ...(options.headers || {}) };
-  return fetch(url, { ...options, headers });
+  const headers = getAuthHeaders(options.headers || {});
+  const response = await fetch(url, { ...options, headers });
+  const token = getAuthToken();
+  if ((response.status === 401 || response.status === 403) && token) {
+    const message = await parseErrorResponse(response);
+    forceReauth(message);
+    throw new Error(message);
+  }
+  return response;
+}
+
+function forceReauth(message) {
+  logout();
+  if (authError) {
+    authError.textContent = message || 'Сессия истекла. Войдите снова.';
+    authError.classList.remove('hidden');
+  }
 }
 
 function showAuthOverlay() {
@@ -106,7 +142,7 @@ async function handleAuthSubmit(event) {
     localStorage.setItem(JWT_STORAGE_KEY, authToken);
     localStorage.setItem(AUTH_USER_STORAGE_KEY, authUsernameValue);
     hideAuthOverlay();
-    await restoreSessionFromStorage();
+    await Promise.all([restoreSessionFromStorage(), loadProfile()]);
     promptInput?.focus();
   } catch (error) {
     if (authError) {
@@ -134,7 +170,7 @@ function escapeHtml(text) {
     .replaceAll('"', '&quot;');
 }
 
-function renderMemoryPanel(snapshot, logs) {
+function renderMemoryPanel(snapshot, logs, personalizationLogs, profileSnapshot) {
   if (!memoryPanel) return;
   memoryPanel.classList.remove('hidden');
 
@@ -180,8 +216,85 @@ function renderMemoryPanel(snapshot, logs) {
     .join('');
   memoryTabLong.innerHTML = longHtml || '<p>Нет долговременных данных</p>';
 
-  if (memoryLogsEl && logs?.length) {
-    memoryLogsEl.innerHTML = logs.map((line) => `<div>${escapeHtml(line)}</div>`).join('');
+  const allLogs = [...(personalizationLogs || []), ...(logs || [])];
+  if (memoryLogsEl) {
+    if (profileSnapshot?.appliedToPrompt) {
+      allLogs.unshift('Активный профиль применён к запросу');
+    }
+    memoryLogsEl.innerHTML = allLogs.length
+      ? allLogs.map((line) => `<div>${escapeHtml(line)}</div>`).join('')
+      : '';
+  }
+}
+
+function renderProfileSummary(profile) {
+  if (!profileActiveSummary) return;
+  const parts = [];
+  if (profile?.displayName) parts.push(`Имя: ${profile.displayName}`);
+  if (profile?.responseStyle) parts.push(`Стиль: ${profile.responseStyle}`);
+  if (profile?.responseFormat) parts.push(`Формат: ${profile.responseFormat}`);
+  if (profile?.constraints) parts.push(`Ограничения: ${profile.constraints}`);
+  if (!parts.length) {
+    profileActiveSummary.classList.add('hidden');
+    profileActiveSummary.textContent = '';
+    return;
+  }
+  profileActiveSummary.textContent = `Активный профиль: ${parts.join(' · ')}`;
+  profileActiveSummary.classList.remove('hidden');
+}
+
+function fillProfileForm(profile) {
+  if (profileDisplayName) profileDisplayName.value = profile?.displayName || '';
+  if (profileResponseStyle) profileResponseStyle.value = profile?.responseStyle || '';
+  if (profileResponseFormat) profileResponseFormat.value = profile?.responseFormat || '';
+  if (profileConstraints) profileConstraints.value = profile?.constraints || '';
+  renderProfileSummary(profile);
+}
+
+function showProfileStatus(message, isError = false) {
+  if (!profileStatus) return;
+  profileStatus.textContent = message;
+  profileStatus.classList.toggle('hidden', !message);
+  profileStatus.style.color = isError ? '#b91c1c' : '';
+}
+
+async function loadProfile() {
+  if (!getAuthToken()) return;
+  try {
+    const response = await apiFetch('/api/user/profile');
+    if (!response.ok) return;
+    const data = await response.json();
+    fillProfileForm(data);
+  } catch {
+    // optional
+  }
+}
+
+async function saveProfile(event) {
+  event?.preventDefault();
+  showProfileStatus('');
+  if (!getAuthToken()) {
+    showProfileStatus('Сначала войдите в аккаунт.', true);
+    showAuthOverlay();
+    return;
+  }
+  const payload = {
+    displayName: profileDisplayName?.value?.trim() || null,
+    responseStyle: profileResponseStyle?.value || null,
+    responseFormat: profileResponseFormat?.value || null,
+    constraints: profileConstraints?.value?.trim() || null,
+  };
+  try {
+    const response = await apiFetch('/api/user/profile', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(await parseErrorResponse(response));
+    const data = await response.json();
+    fillProfileForm(data);
+    showProfileStatus('Профиль сохранён');
+  } catch (error) {
+    showProfileStatus(error.message, true);
   }
 }
 
@@ -199,6 +312,8 @@ async function loadMemoryPanel() {
         longTermInContext: data.longTerm?.longTerm || {},
       },
       data.memoryLogs || [],
+      [],
+      null,
     );
   } catch {
     // optional
@@ -419,6 +534,15 @@ async function parseErrorResponse(response) {
     const data = await response.json();
     return data.error || data.message || `Сервер вернул ошибку: ${response.status}`;
   } catch {
+    try {
+      const text = await response.text();
+      if (text) return text;
+    } catch {
+      // ignore
+    }
+    if (response.status === 401 || response.status === 403) {
+      return 'Требуется авторизация. Войдите снова.';
+    }
     return `Сервер вернул ошибку: ${response.status}`;
   }
 }
@@ -470,7 +594,12 @@ async function sendMessage(prompt) {
     updateTokenPanel(data.tokens);
 
     if (data.memorySnapshot) {
-      renderMemoryPanel(data.memorySnapshot, data.memoryLogs || []);
+      renderMemoryPanel(
+        data.memorySnapshot,
+        data.memoryLogs || [],
+        data.personalizationLogs || [],
+        data.profileSnapshot || null,
+      );
     } else {
       await loadMemoryPanel();
     }
@@ -517,6 +646,7 @@ logoutBtn?.addEventListener('click', logout);
 authForm?.addEventListener('submit', handleAuthSubmit);
 authTabLogin?.addEventListener('click', () => setAuthMode('login'));
 authTabRegister?.addEventListener('click', () => setAuthMode('register'));
+profileForm?.addEventListener('submit', saveProfile);
 promptInput.addEventListener('input', resizeInput);
 promptInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
@@ -528,9 +658,9 @@ promptInput.addEventListener('keydown', (event) => {
 initMemoryTabs();
 resizeInput();
 
-if (authToken) {
+if (getAuthToken()) {
   hideAuthOverlay();
-  restoreSessionFromStorage().finally(() => promptInput.focus());
+  Promise.all([restoreSessionFromStorage(), loadProfile()]).finally(() => promptInput.focus());
 } else {
   showAuthOverlay();
 }
