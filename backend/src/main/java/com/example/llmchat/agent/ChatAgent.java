@@ -94,7 +94,8 @@ public class ChatAgent {
                 + (memorySnapshot.longTermInContext() != null && !memorySnapshot.longTermInContext().isEmpty() ? 1 : 0);
 
         List<String> logs = new ArrayList<>(assembled.memoryLogs());
-        logs.add("Память: SHORT (окно) + WORKING (facts) + LONG (профиль)");
+        logs.addAll(assembled.personalizationLogs());
+        logs.add("Память: PROFILE + LONG + WORKING + SHORT (окно)");
         logs.add("Окно: " + contextStrategyService.windowSize() + " сообщений");
         int stored = conversationStore.getStoredMessageCount(activeSessionId);
         int dropped = Math.max(0, stored - assembled.messagesInContext());
@@ -200,7 +201,15 @@ public class ChatAgent {
                 contextStrategyService.windowSize(),
                 conversationStore.getStoredMessageCount(activeSessionId));
 
-        return new AgentResponse(answer, sessionId, List.copyOf(logs), tokenStats, finalSnapshot, List.copyOf(memoryLogs));
+        return new AgentResponse(
+                answer,
+                sessionId,
+                List.copyOf(logs),
+                tokenStats,
+                finalSnapshot,
+                List.copyOf(memoryLogs),
+                assembled.profileSnapshot(),
+                List.copyOf(assembled.personalizationLogs()));
     }
 
     public void resetSession(String sessionId, String userId) {
@@ -223,6 +232,9 @@ public class ChatAgent {
 
     private int estimateHistoryTokens(ContextAssembler.AssembledContext assembled) {
         int total = 0;
+        if (assembled.profileBlock() != null && !assembled.profileBlock().isBlank()) {
+            total += tokenCounter.estimateMessageTokens("system", assembled.profileBlock());
+        }
         if (assembled.summary() != null && !assembled.summary().isBlank()) {
             total += contextCompressionService.estimateSummaryTokens(assembled.summary());
         }

@@ -8,5 +8,7 @@ public record AgentResponse(
         List<String> logs,
         TokenStats tokens,
         MemoryContextSnapshot memorySnapshot,
-        List<String> memoryLogs) {
+        List<String> memoryLogs,
+        UserProfileSnapshot profileSnapshot,
+        List<String> personalizationLogs) {
 }

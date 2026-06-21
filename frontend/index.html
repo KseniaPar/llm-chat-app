@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 11 — Модель памяти ассистента</title>
+  <title>День 12 — Персонализация ассистента</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -13,7 +13,7 @@
   <div id="auth-overlay" class="auth-overlay">
     <section class="auth-card">
       <h2 class="auth-card__title">Вход в платформу</h2>
-      <p class="auth-card__desc">День 11 — stateful агент с тремя слоями памяти</p>
+      <p class="auth-card__desc">День 12 — явный профиль студента в каждом запросе</p>
       <div class="auth-card__tabs">
         <button id="auth-tab-login" class="auth-card__tab auth-card__tab--active" type="button">Вход</button>
         <button id="auth-tab-register" class="auth-card__tab" type="button">Регистрация</button>
@@ -41,7 +41,7 @@
             <div class="chat-header__avatar" aria-hidden="true">AI</div>
             <div class="chat-header__info">
               <h1>Агент</h1>
-              <p>День 11 — память: SHORT / WORKING / LONG</p>
+              <p>День 12 — персонализация + память SHORT / WORKING / LONG</p>
             </div>
             <span id="auth-user-label" class="chat-header__user"></span>
             <span id="loading" class="chat-header__status hidden" aria-live="polite">
@@ -110,6 +110,40 @@
           <div id="token-bar-fill" class="token-bar__fill"></div>
         </div>
         <p id="token-warning" class="token-panel__warning hidden"></p>
+        <div id="profile-panel" class="profile-panel">
+          <h3 class="profile-panel__title">Профиль</h3>
+          <form id="profile-form" class="profile-panel__form">
+            <label class="profile-panel__label">
+              Имя
+              <input id="profile-display-name" class="profile-panel__input" type="text" placeholder="Марина">
+            </label>
+            <label class="profile-panel__label">
+              Стиль ответов
+              <select id="profile-response-style" class="profile-panel__input">
+                <option value="">— не задан —</option>
+                <option value="кратко, без воды">Кратко, без воды</option>
+                <option value="подробно с примерами">Подробно с примерами</option>
+                <option value="как преподаватель">Как преподаватель</option>
+              </select>
+            </label>
+            <label class="profile-panel__label">
+              Формат
+              <select id="profile-response-format" class="profile-panel__input">
+                <option value="">— не задан —</option>
+                <option value="нумерованные списки">Нумерованные списки</option>
+                <option value="абзацы">Абзацы</option>
+                <option value="конспект">Конспект</option>
+              </select>
+            </label>
+            <label class="profile-panel__label">
+              Ограничения
+              <textarea id="profile-constraints" class="profile-panel__textarea" rows="2" placeholder="Не использовать английские термины без перевода"></textarea>
+            </label>
+            <button id="profile-save-btn" class="profile-panel__save" type="submit">Сохранить</button>
+          </form>
+          <div id="profile-active-summary" class="profile-panel__summary hidden"></div>
+          <p id="profile-status" class="profile-panel__status hidden" role="status"></p>
+        </div>
         <div id="memory-panel" class="memory-panel">
           <h3 class="memory-panel__title">Память агента</h3>
           <div class="memory-panel__tabs" role="tablist">

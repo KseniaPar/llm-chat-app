@@ -5,6 +5,9 @@ import com.example.llmchat.agent.ContextStrategy;
 import com.example.llmchat.agent.OpenRouterHttpClient;
 import com.example.llmchat.dto.AgentChatMessage;
 import com.example.llmchat.dto.MemoryContextSnapshot;
+import com.example.llmchat.dto.UserProfileSnapshot;
+import com.example.llmchat.personalization.PersonalizationService;
+import com.example.llmchat.personalization.UserProfile;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -17,14 +20,17 @@ public class ContextAssembler {
 
     private final MemoryManager memoryManager;
     private final ContextCompressionService contextCompressionService;
+    private final PersonalizationService personalizationService;
     private final String systemPrompt;
 
     public ContextAssembler(
             MemoryManager memoryManager,
             ContextCompressionService contextCompressionService,
+            PersonalizationService personalizationService,
             @Value("${app.agent.system-prompt}") String systemPrompt) {
         this.memoryManager = memoryManager;
         this.contextCompressionService = contextCompressionService;
+        this.personalizationService = personalizationService;
         this.systemPrompt = systemPrompt;
     }
 
@@ -39,6 +45,20 @@ public class ContextAssembler {
 
         List<OpenRouterHttpClient.ChatMessage> messages = new ArrayList<>();
         messages.add(new OpenRouterHttpClient.ChatMessage("system", systemPrompt));
+
+        UserProfile profile = personalizationService.getProfile(userId);
+        String profileBlock = personalizationService.formatProfileBlock(profile);
+        boolean profileApplied = profileBlock != null;
+        List<String> personalizationLogs = personalizationService.buildPersonalizationLogs(profile, profileApplied);
+        if (profileApplied) {
+            messages.add(new OpenRouterHttpClient.ChatMessage("system", profileBlock));
+        }
+        UserProfileSnapshot profileSnapshot = new UserProfileSnapshot(
+                profile.displayName(),
+                profile.responseStyle(),
+                profile.responseFormat(),
+                profile.constraints(),
+                profileApplied);
 
         String longTermBlock = memoryManager.formatLongTermBlock(snapshot.longTermInContext());
         if (longTermBlock != null) {
@@ -80,7 +100,10 @@ public class ContextAssembler {
                 logs,
                 snapshot.shortTermInContext().size(),
                 factsBlock,
-                snapshot.workingSummaryInContext());
+                snapshot.workingSummaryInContext(),
+                profileBlock,
+                profileSnapshot,
+                personalizationLogs);
     }
 
     public record AssembledContext(
@@ -89,6 +112,9 @@ public class ContextAssembler {
             List<String> memoryLogs,
             int messagesInContext,
             String factsBlock,
-            String summary) {
+            String summary,
+            String profileBlock,
+            UserProfileSnapshot profileSnapshot,
+            List<String> personalizationLogs) {
     }
 }
