@@ -10,5 +10,7 @@ public record AgentResponse(
         MemoryContextSnapshot memorySnapshot,
         List<String> memoryLogs,
         UserProfileSnapshot profileSnapshot,
-        List<String> personalizationLogs) {
+        List<String> personalizationLogs,
+        TaskStateSnapshot taskStateSnapshot,
+        List<String> taskStateLogs) {
 }

@@ -4,9 +4,13 @@ import com.example.llmchat.dto.AgentChatMessage;
 import com.example.llmchat.dto.AgentRequest;
 import com.example.llmchat.dto.AgentResponse;
 import com.example.llmchat.dto.MemoryContextSnapshot;
+import com.example.llmchat.dto.TaskStateSnapshot;
 import com.example.llmchat.dto.TokenStats;
 import com.example.llmchat.memory.ContextAssembler;
 import com.example.llmchat.memory.MemoryManager;
+import com.example.llmchat.task.TaskState;
+import com.example.llmchat.task.TaskStateService;
+import com.example.llmchat.task.TaskStateUpdaterService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -29,6 +33,8 @@ public class ChatAgent {
     private final FactsMemoryService factsMemoryService;
     private final ContextAssembler contextAssembler;
     private final MemoryManager memoryManager;
+    private final TaskStateService taskStateService;
+    private final TaskStateUpdaterService taskStateUpdaterService;
     private final String model;
     private final double temperature;
     private final int maxTokens;
@@ -43,6 +49,8 @@ public class ChatAgent {
             FactsMemoryService factsMemoryService,
             ContextAssembler contextAssembler,
             MemoryManager memoryManager,
+            TaskStateService taskStateService,
+            TaskStateUpdaterService taskStateUpdaterService,
             @Value("${app.openrouter.model}") String model,
             @Value("${app.agent.temperature}") double temperature,
             @Value("${app.agent.max-tokens}") int maxTokens) {
@@ -55,6 +63,8 @@ public class ChatAgent {
         this.factsMemoryService = factsMemoryService;
         this.contextAssembler = contextAssembler;
         this.memoryManager = memoryManager;
+        this.taskStateService = taskStateService;
+        this.taskStateUpdaterService = taskStateUpdaterService;
         this.model = model;
         this.temperature = temperature;
         this.maxTokens = maxTokens;
@@ -79,6 +89,64 @@ public class ChatAgent {
 
         String activeSessionId = sessionId;
 
+        taskStateService.promotePendingState(activeSessionId);
+
+        List<String> taskStateLogs = new ArrayList<>();
+        TaskStateService.PauseResumeCommand command = taskStateService.detectCommand(prompt);
+        if (command == TaskStateService.PauseResumeCommand.PAUSE) {
+            if (taskStateService.getState(activeSessionId).isPresent()) {
+                TaskState paused = taskStateService.pause(activeSessionId);
+                taskStateLogs.add("TASK → пауза включена");
+                taskStateLogs.addAll(taskStateService.buildTaskStateLogs(paused, false));
+            } else {
+                taskStateLogs.add("TASK → пауза: задача ещё не начата");
+            }
+        } else if (command == TaskStateService.PauseResumeCommand.RESUME) {
+            if (taskStateService.getState(activeSessionId).isPresent()) {
+                TaskState resumed = taskStateService.resume(activeSessionId);
+                taskStateLogs.add("TASK → продолжение");
+                taskStateLogs.addAll(taskStateService.buildTaskStateLogs(resumed, false));
+            } else {
+                taskStateLogs.add("TASK → продолжение: задача ещё не начата");
+            }
+        }
+
+        taskStateService.bootstrapPlanningIfNeeded(activeSessionId, prompt).ifPresent(state -> {
+            taskStateLogs.add("TASK → задача начата до ответа (этап: Подготовка плана)");
+            taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
+        });
+
+        int priorMessages = conversationStore.getStoredMessageCount(activeSessionId);
+        taskStateService.advancePlanningSubPhase(activeSessionId, prompt, priorMessages).ifPresent(state -> {
+            taskStateLogs.add("TASK → переход к согласованию плана");
+            taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
+        });
+
+        taskStateService.confirmExecutionIfReady(activeSessionId, prompt).ifPresent(state -> {
+            taskStateLogs.add("TASK → переход к разбору тем");
+            taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
+        });
+
+        taskStateService.startValidationIfReady(activeSessionId, prompt).ifPresent(state -> {
+            taskStateLogs.add("TASK → переход к самопроверке");
+            taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
+        });
+
+        taskStateService.advanceValidationAfterMcqAnswer(activeSessionId, prompt).ifPresent(state -> {
+            taskStateLogs.add("TASK → следующий вопрос самопроверки");
+            taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
+        });
+
+        taskStateService.autoAdvanceToValidationIfReady(activeSessionId).ifPresent(state -> {
+            taskStateLogs.add("TASK → авто: самопроверка");
+            taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
+        });
+
+        taskStateService.autoAdvanceToDoneIfReady(activeSessionId).ifPresent(state -> {
+            taskStateLogs.add("TASK → авто: тема пройдена");
+            taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
+        });
+
         ContextAssembler.AssembledContext assembled =
                 contextAssembler.assemble(userId, activeSessionId, prompt, strategy, useDay10Strategy);
         List<OpenRouterHttpClient.ChatMessage> messages = assembled.messages();
@@ -91,11 +159,14 @@ public class ChatAgent {
         int messagesInContext = assembled.messagesInContext()
                 + (assembled.factsBlock() != null ? 1 : 0)
                 + (assembled.summary() != null && !assembled.summary().isBlank() ? 1 : 0)
-                + (memorySnapshot.longTermInContext() != null && !memorySnapshot.longTermInContext().isEmpty() ? 1 : 0);
+                + (memorySnapshot.longTermInContext() != null && !memorySnapshot.longTermInContext().isEmpty() ? 1 : 0)
+                + (assembled.taskBlock() != null ? 1 : 0);
 
         List<String> logs = new ArrayList<>(assembled.memoryLogs());
         logs.addAll(assembled.personalizationLogs());
-        logs.add("Память: PROFILE + LONG + WORKING + SHORT (окно)");
+        logs.addAll(taskStateLogs);
+        logs.addAll(assembled.taskStateLogs());
+        logs.add("Память: PROFILE + TASK + LONG + WORKING + SHORT (окно)");
         logs.add("Окно: " + contextStrategyService.windowSize() + " сообщений");
         int stored = conversationStore.getStoredMessageCount(activeSessionId);
         int dropped = Math.max(0, stored - assembled.messagesInContext());
@@ -147,6 +218,18 @@ public class ChatAgent {
         conversationStore.append(activeSessionId, "assistant", answer);
         memoryLogs.add("SHORT → assistant: сохранено сообщение");
 
+        if (command == TaskStateService.PauseResumeCommand.NONE) {
+            taskStateUpdaterService.updateFromTurn(
+                    activeSessionId,
+                    prompt,
+                    answer,
+                    updatedFacts,
+                    recent).ifPresent(updated -> {
+                taskStateLogs.add("TASK → состояние для следующего хода обновлено (LLM)");
+                taskStateLogs.addAll(taskStateService.buildTaskStateLogs(updated, false));
+            });
+        }
+
         contextStrategyService.afterAssistantMessage(activeSessionId, strategy);
         conversationStore.addTokenUsage(activeSessionId, promptTokensActual, responseTokens);
 
@@ -172,6 +255,13 @@ public class ChatAgent {
         int factsTokens = factsMemoryService.estimateFactsTokens(factsForStats);
 
         MemoryContextSnapshot finalSnapshot = memoryManager.buildContextSnapshot(userId, activeSessionId, strategy);
+
+        TaskStateSnapshot responseTaskSnapshot = assembled.taskStateSnapshot() != null
+                && assembled.taskStateSnapshot().active()
+                ? assembled.taskStateSnapshot()
+                : taskStateService.toSnapshot(
+                        taskStateService.getState(activeSessionId).orElse(null),
+                        assembled.taskBlock() != null);
 
         TokenStats tokenStats = new TokenStats(
                 currentPromptTokens,
@@ -209,7 +299,9 @@ public class ChatAgent {
                 finalSnapshot,
                 List.copyOf(memoryLogs),
                 assembled.profileSnapshot(),
-                List.copyOf(assembled.personalizationLogs()));
+                List.copyOf(assembled.personalizationLogs()),
+                responseTaskSnapshot,
+                List.copyOf(taskStateLogs));
     }
 
     public void resetSession(String sessionId, String userId) {
@@ -234,6 +326,9 @@ public class ChatAgent {
         int total = 0;
         if (assembled.profileBlock() != null && !assembled.profileBlock().isBlank()) {
             total += tokenCounter.estimateMessageTokens("system", assembled.profileBlock());
+        }
+        if (assembled.taskBlock() != null && !assembled.taskBlock().isBlank()) {
+            total += tokenCounter.estimateMessageTokens("system", assembled.taskBlock());
         }
         if (assembled.summary() != null && !assembled.summary().isBlank()) {
             total += contextCompressionService.estimateSummaryTokens(assembled.summary());
