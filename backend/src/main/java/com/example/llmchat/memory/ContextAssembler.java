@@ -15,6 +15,8 @@ import com.example.llmchat.personalization.PersonalizationService;
 import com.example.llmchat.personalization.UserProfile;
 import com.example.llmchat.task.TaskState;
 import com.example.llmchat.task.TaskStateService;
+import com.example.llmchat.task.TaskTransitionService;
+import com.example.llmchat.task.TaskTransitionType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -29,6 +31,7 @@ public class ContextAssembler {
     private final ContextCompressionService contextCompressionService;
     private final PersonalizationService personalizationService;
     private final TaskStateService taskStateService;
+    private final TaskTransitionService taskTransitionService;
     private final InvariantsService invariantsService;
     private final String systemPrompt;
 
@@ -37,12 +40,14 @@ public class ContextAssembler {
             ContextCompressionService contextCompressionService,
             PersonalizationService personalizationService,
             TaskStateService taskStateService,
+            TaskTransitionService taskTransitionService,
             InvariantsService invariantsService,
             @Value("${app.agent.system-prompt}") String systemPrompt) {
         this.memoryManager = memoryManager;
         this.contextCompressionService = contextCompressionService;
         this.personalizationService = personalizationService;
         this.taskStateService = taskStateService;
+        this.taskTransitionService = taskTransitionService;
         this.invariantsService = invariantsService;
         this.systemPrompt = systemPrompt;
     }
@@ -84,7 +89,8 @@ public class ContextAssembler {
                 profileApplied);
 
         TaskState taskState = taskStateService.getState(sessionId).orElse(null);
-        String taskBlock = taskStateService.formatTaskBlock(taskState);
+        List<TaskTransitionType> allowedTransitions = taskTransitionService.allowedNext(sessionId);
+        String taskBlock = taskStateService.formatTaskBlock(taskState, allowedTransitions);
         boolean taskApplied = taskBlock != null;
         List<String> taskStateLogs = taskStateService.buildTaskStateLogs(taskState, taskApplied);
         if (taskApplied) {

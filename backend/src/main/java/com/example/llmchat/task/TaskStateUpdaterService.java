@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -18,7 +19,7 @@ public class TaskStateUpdaterService {
     private final OpenRouterHttpClient openRouterHttpClient;
     private final TaskStateRepository taskStateRepository;
     private final TaskStateService taskStateService;
-    private final TaskStateMachine taskStateMachine;
+    private final TaskTransitionService taskTransitionService;
     private final ObjectMapper objectMapper;
     private final String model;
     private final double temperature;
@@ -29,7 +30,7 @@ public class TaskStateUpdaterService {
             OpenRouterHttpClient openRouterHttpClient,
             TaskStateRepository taskStateRepository,
             TaskStateService taskStateService,
-            TaskStateMachine taskStateMachine,
+            TaskTransitionService taskTransitionService,
             ObjectMapper objectMapper,
             @Value("${app.openrouter.model}") String model,
             @Value("${app.agent.temperature}") double temperature,
@@ -38,7 +39,7 @@ public class TaskStateUpdaterService {
         this.openRouterHttpClient = openRouterHttpClient;
         this.taskStateRepository = taskStateRepository;
         this.taskStateService = taskStateService;
-        this.taskStateMachine = taskStateMachine;
+        this.taskTransitionService = taskTransitionService;
         this.objectMapper = objectMapper;
         this.model = model;
         this.temperature = temperature;
@@ -46,7 +47,7 @@ public class TaskStateUpdaterService {
         this.updatePrompt = updatePrompt;
     }
 
-    public Optional<TaskState> updateFromTurn(
+    public Optional<UpdateTurnResult> updateFromTurn(
             String sessionId,
             String userMessage,
             String assistantMessage,
@@ -54,7 +55,7 @@ public class TaskStateUpdaterService {
             List<AgentChatMessage> recentMessages) {
         Optional<TaskState> existing = taskStateRepository.findBySessionId(sessionId);
         if (existing.isPresent() && existing.get().paused()) {
-            return existing;
+            return Optional.of(new UpdateTurnResult(existing.get(), List.of()));
         }
 
         StringBuilder userContent = new StringBuilder();
@@ -96,7 +97,7 @@ public class TaskStateUpdaterService {
         CompletionResult completion = openRouterHttpClient.complete(model, temperature, maxTokens, request, false);
         TaskStateMachine.TaskStateProposal parsed = parseProposal(completion.content());
         if (parsed == null) {
-            return existing;
+            return existing.map(state -> new UpdateTurnResult(state, List.of()));
         }
 
         final TaskStateMachine.TaskStateProposal proposal =
@@ -105,34 +106,126 @@ public class TaskStateUpdaterService {
         TaskState base = existing.orElseGet(() -> TaskState.initialPlanning(
                 sessionId,
                 proposal.taskTitle() != null ? proposal.taskTitle() : "Подготовка к экзамену"));
-        TaskState merged = taskStateMachine.applyProposal(base, proposal);
+
+        List<TransitionResult> transitionResults = new ArrayList<>();
+        TransitionResult machineTransition = taskTransitionService.applyFromProposal(
+                sessionId,
+                base,
+                proposal,
+                TaskTransitionTriggerSource.LLM,
+                userMessage,
+                false);
+        transitionResults.add(machineTransition);
+        TaskState merged = machineTransition.newState();
+
         merged = enrichPlanningState(merged, userMessage, existing);
+        if (!sameState(merged, machineTransition.newState())) {
+            TransitionResult enrichResult = taskTransitionService.apply(
+                    sessionId,
+                    TaskTransitionRequest.deferred(
+                            TaskTransitionType.UPDATE_IN_PHASE,
+                            TaskTransitionTriggerSource.LLM,
+                            merged,
+                            TaskTransitionContext.forLlm(userMessage)));
+            transitionResults.add(enrichResult);
+            merged = enrichResult.newState();
+        }
+
         merged = enrichValidationState(merged, existing);
-        merged = autoAdvanceAfterTurn(merged, assistantMessage, userMessage, existing);
+        if (!sameState(merged, transitionResults.get(transitionResults.size() - 1).newState())) {
+            TransitionResult enrichResult = taskTransitionService.apply(
+                    sessionId,
+                    TaskTransitionRequest.deferred(
+                            TaskTransitionType.UPDATE_IN_PHASE,
+                            TaskTransitionTriggerSource.LLM,
+                            merged,
+                            TaskTransitionContext.forLlm(userMessage)));
+            transitionResults.add(enrichResult);
+            merged = enrichResult.newState();
+        }
+
+        Optional<UpdateTurnResult> autoResult = autoAdvanceAfterTurn(
+                sessionId,
+                merged,
+                assistantMessage,
+                userMessage,
+                existing);
+        if (autoResult.isPresent()) {
+            UpdateTurnResult turn = autoResult.get();
+            List<TransitionResult> all = new ArrayList<>(transitionResults);
+            all.addAll(turn.transitionResults());
+            taskStateService.deferStateUpdate(turn.state());
+            return Optional.of(new UpdateTurnResult(turn.state(), all));
+        }
+
         taskStateService.deferStateUpdate(merged);
-        return Optional.of(merged);
+        return Optional.of(new UpdateTurnResult(merged, transitionResults));
     }
 
-    private TaskState autoAdvanceAfterTurn(
+    private Optional<UpdateTurnResult> autoAdvanceAfterTurn(
+            String sessionId,
             TaskState merged,
             String assistantMessage,
             String userMessage,
             Optional<TaskState> existing) {
         if (merged.paused()) {
-            return merged;
+            return Optional.empty();
         }
         if (merged.phase() == TaskPhase.DONE) {
-            return merged;
+            return Optional.empty();
         }
-        if (merged.phase() == TaskPhase.EXECUTION
-                && (TaskStateTransitions.executionComplete(merged)
+        List<TransitionResult> results = new ArrayList<>();
+        TaskState current = merged;
+
+        if (current.phase() == TaskPhase.EXECUTION
+                && (TaskStateTransitions.executionComplete(current)
                 || TaskStateTransitions.assistantSuggestsValidation(assistantMessage))) {
-            return taskStateService.toValidationState(merged);
+            TransitionResult result = taskTransitionService.apply(
+                    sessionId,
+                    TaskTransitionRequest.deferred(
+                            TaskTransitionType.EXECUTION_TO_VALIDATION,
+                            TaskTransitionTriggerSource.AUTO,
+                            taskStateService.toValidationState(current),
+                            TaskTransitionContext.forAuto()));
+            results.add(result);
+            if (!result.accepted()) {
+                return Optional.of(new UpdateTurnResult(current, results));
+            }
+            current = result.newState();
         }
-        if (merged.phase() == TaskPhase.VALIDATION && shouldFinishValidation(merged, assistantMessage, userMessage, existing)) {
-            return taskStateService.toDoneState(merged);
+
+        if (current.phase() == TaskPhase.VALIDATION && shouldFinishValidation(current, assistantMessage, userMessage, existing)) {
+            TransitionResult result = taskTransitionService.apply(
+                    sessionId,
+                    TaskTransitionRequest.deferred(
+                            TaskTransitionType.VALIDATION_TO_DONE,
+                            TaskTransitionTriggerSource.AUTO,
+                            taskStateService.toDoneState(current),
+                            TaskTransitionContext.forAuto()));
+            results.add(result);
+            if (result.accepted()) {
+                current = result.newState();
+            }
         }
-        return merged;
+
+        if (results.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new UpdateTurnResult(current, results));
+    }
+
+    private boolean sameState(TaskState left, TaskState right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null || right == null) {
+            return false;
+        }
+        return left.phase() == right.phase()
+                && left.currentStep().equals(right.currentStep())
+                && left.expectedAction().equals(right.expectedAction())
+                && left.paused() == right.paused()
+                && java.util.Objects.equals(left.taskTitle(), right.taskTitle());
     }
 
     private boolean shouldFinishValidation(
@@ -285,6 +378,13 @@ public class TaskStateUpdaterService {
                             : "Задать уточняющие вопросы и получить подтверждение плана перед разбором",
                     parsed.taskTitle());
         }
+        if (parsed.phase() == TaskPhase.VALIDATION) {
+            return new TaskStateMachine.TaskStateProposal(
+                    TaskPhase.PLANNING,
+                    existing.get().currentStep(),
+                    existing.get().expectedAction(),
+                    parsed.taskTitle() != null ? parsed.taskTitle() : existing.get().taskTitle());
+        }
         return parsed;
     }
 
@@ -322,5 +422,8 @@ public class TaskStateUpdaterService {
         } catch (Exception exception) {
             return null;
         }
+    }
+
+    public record UpdateTurnResult(TaskState state, List<TransitionResult> transitionResults) {
     }
 }

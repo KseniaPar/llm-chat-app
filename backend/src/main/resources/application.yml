@@ -88,7 +88,7 @@ app:
           description: Самопроверка (вопросы A/B/C/D) только после этапа «Разбор тем», когда все пункты плана пройдены (N/M, N=M).
           refusalHint: Сначала согласуем план и разберём все темы — затем начну самопроверку.
           hardBlock: true
-          activeWhen: TASK_ACTIVE
+          activeWhen: ALWAYS
           guard: VALIDATION_BEFORE_EXECUTION_COMPLETE
         - id: INV-BIZ-02
           title: Разбор только после «начнём»
@@ -153,6 +153,13 @@ app:
           hardBlock: true
           activeWhen: TASK_EXECUTION
           guard: SKIP_TOPIC_IN_EXECUTION
+        - id: INV-BIZ-14
+          title: Завершение только после самопроверки
+          description: Нельзя завершить задачу (done) до прохождения самопроверки; на planning/execution — сначала план и разбор, на validation — все вопросы.
+          refusalHint: Сначала завершим разбор и пройдём самопроверку — затем закроем задачу.
+          hardBlock: true
+          activeWhen: TASK_ACTIVE
+          guard: FINISH_WITHOUT_VALIDATION
         - id: INV-BIZ-11
           title: Самопроверка — без лекции
           description: На validation не начинай полный разбор темы; только пояснение к текущему MCQ при необходимости.

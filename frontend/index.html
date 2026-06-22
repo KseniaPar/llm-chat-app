@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 14 — Бизнес-инварианты</title>
+  <title>День 15 — Контролируемые переходы</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -13,7 +13,7 @@
   <div id="auth-overlay" class="auth-overlay">
     <section class="auth-card">
       <h2 class="auth-card__title">Вход в платформу</h2>
-      <p class="auth-card__desc">День 14 — бизнес-инварианты учебного ассистента</p>
+      <p class="auth-card__desc">День 15 — контролируемые переходы состояний задачи</p>
       <div class="auth-card__tabs">
         <button id="auth-tab-login" class="auth-card__tab auth-card__tab--active" type="button">Вход</button>
         <button id="auth-tab-register" class="auth-card__tab" type="button">Регистрация</button>
@@ -41,7 +41,7 @@
             <div class="chat-header__avatar" aria-hidden="true">AI</div>
             <div class="chat-header__info">
               <h1>Агент</h1>
-              <p>День 14 — бизнес-инварианты + задача + память + профиль</p>
+              <p>День 15 — контролируемые переходы + инварианты + задача + память</p>
             </div>
             <span id="auth-user-label" class="chat-header__user"></span>
             <span id="loading" class="chat-header__status hidden" aria-live="polite">
@@ -161,10 +161,19 @@
             </div>
           </div>
         </div>
+        <div id="transitions-panel" class="transitions-panel">
+          <h3 class="transitions-panel__title">
+            Переходы состояния
+            <span id="transitions-allowed-badge" class="transitions-panel__badge">—</span>
+          </h3>
+          <div id="transitions-allowed" class="transitions-panel__allowed"></div>
+          <ul id="transitions-list" class="transitions-panel__list"></ul>
+          <p id="transitions-empty" class="transitions-panel__empty">История переходов пуста</p>
+        </div>
         <div id="invariants-panel" class="invariants-panel">
           <h3 class="invariants-panel__title">
             Бизнес-правила
-            <span id="invariants-count-badge" class="invariants-panel__badge">13</span>
+            <span id="invariants-count-badge" class="invariants-panel__badge">14</span>
           </h3>
           <ul id="invariants-list" class="invariants-panel__list"></ul>
         </div>

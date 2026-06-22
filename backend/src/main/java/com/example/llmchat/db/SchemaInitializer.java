@@ -125,6 +125,28 @@ public class SchemaInitializer {
                 )
                 """);
 
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS session_task_transitions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                    transition_type TEXT NOT NULL,
+                    from_phase TEXT,
+                    to_phase TEXT,
+                    from_step TEXT,
+                    to_step TEXT,
+                    trigger_source TEXT NOT NULL,
+                    accepted INTEGER NOT NULL DEFAULT 1,
+                    rejection_code TEXT,
+                    rejection_reason TEXT,
+                    created_at TEXT NOT NULL
+                )
+                """);
+
+        jdbcTemplate.execute("""
+                CREATE INDEX IF NOT EXISTS idx_task_transitions_session
+                ON session_task_transitions(session_id, created_at)
+                """);
+
         log.info("SQLite schema initialized at {}", databasePath);
     }
 }

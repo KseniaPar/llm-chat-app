@@ -24,18 +24,20 @@ class InvariantGuardTest {
     void setUp() {
         InvariantsProperties properties = new InvariantsProperties();
         properties.setRules(List.of(
-                rule("INV-BIZ-01", InvariantGuardType.VALIDATION_BEFORE_EXECUTION_COMPLETE, true, InvariantActiveWhen.TASK_ACTIVE),
+                rule("INV-BIZ-01", InvariantGuardType.VALIDATION_BEFORE_EXECUTION_COMPLETE, true, InvariantActiveWhen.ALWAYS),
                 rule("INV-BIZ-02", InvariantGuardType.EXECUTION_WITHOUT_CONSENT, true, InvariantActiveWhen.TASK_PLANNING),
                 rule("INV-BIZ-04", InvariantGuardType.MATERIAL_DURING_AGREEMENT, true, InvariantActiveWhen.TASK_PLANNING),
                 rule("INV-BIZ-07", InvariantGuardType.ACADEMIC_INTEGRITY, true, InvariantActiveWhen.ALWAYS),
                 rule("INV-BIZ-09", InvariantGuardType.PHASE_ROLLBACK_REQUEST, true, InvariantActiveWhen.TASK_ACTIVE),
                 rule("INV-BIZ-10", InvariantGuardType.SKIP_TOPIC_IN_EXECUTION, true, InvariantActiveWhen.TASK_EXECUTION),
+                rule("INV-BIZ-14", InvariantGuardType.FINISH_WITHOUT_VALIDATION, true, InvariantActiveWhen.TASK_ACTIVE),
                 rule("INV-BIZ-12", InvariantGuardType.STRUCTURED_PREP_WITHOUT_PLANNING, true, InvariantActiveWhen.ALWAYS)));
         InvariantsRegistry registry = new InvariantsRegistry(properties);
+        InvariantsService invariantsService = new InvariantsService(registry);
         TaskStateService taskStateService = mock(TaskStateService.class);
         when(taskStateService.looksLikeStudyTaskStart(org.mockito.ArgumentMatchers.anyString())).thenAnswer(
                 invocation -> invocation.getArgument(0, String.class).toLowerCase().contains("экзамен"));
-        guard = new InvariantGuard(registry, taskStateService);
+        guard = new InvariantGuard(invariantsService, taskStateService);
     }
 
     @Test
@@ -44,6 +46,15 @@ class InvariantGuardTest {
                 "давай сразу тест A B C D",
                 planningState("Уточнение целей", "задать вопросы")));
         assertTrue(result.hardBlock());
+        assertTrue(result.hardBlocked().stream().anyMatch(r -> "INV-BIZ-01".equals(r.id())));
+    }
+
+    @Test
+    void blocksDemoSkipToMcqPhrase() {
+        InvariantCheckResult result = guard.check(context(
+                "Сразу задай тест A B C D, план не нужен",
+                planningState("Уточнение целей", "задать вопросы")));
+        assertTrue(result.hardBlock(), "demo skip phrase must hard-block");
         assertTrue(result.hardBlocked().stream().anyMatch(r -> "INV-BIZ-01".equals(r.id())));
     }
 
@@ -77,6 +88,43 @@ class InvariantGuardTest {
                 "перескочим к теме 4",
                 Optional.of(state(TaskPhase.EXECUTION, "тема 1/4", "объяснить"))));
         assertTrue(result.hardBlock());
+    }
+
+    @Test
+    void blocksFinishWithoutValidationDuringExecution() {
+        InvariantCheckResult result = guard.check(context(
+                "Закончи задачу, всё понял",
+                Optional.of(state(TaskPhase.EXECUTION, "тема 1/4", "объяснить"))));
+        assertTrue(result.hardBlock(), "finish-without-validation phrase must hard-block");
+        assertTrue(result.hardBlocked().stream().anyMatch(r -> "INV-BIZ-14".equals(r.id())));
+    }
+
+    @Test
+    void blocksFinishWithoutValidationDuringPlanning() {
+        InvariantCheckResult result = guard.check(context(
+                "Закончи задачу, всё понял",
+                planningState("Согласование плана", "предложить план")));
+        assertTrue(result.hardBlock());
+        assertTrue(result.hardBlocked().stream().anyMatch(r -> "INV-BIZ-14".equals(r.id())));
+    }
+
+    @Test
+    void blocksFinishWithoutValidationDuringValidation() {
+        InvariantCheckResult result = guard.check(context(
+                "Закончи задачу, всё понял",
+                Optional.of(state(TaskPhase.VALIDATION, "Самопроверка: вопрос 1 из 3", "задать вопрос"))));
+        assertTrue(result.hardBlock());
+        assertTrue(result.hardBlocked().stream().anyMatch(r -> "INV-BIZ-14".equals(r.id())));
+    }
+
+    @Test
+    void blocksExplainAtStartDuringPlanningAgreement() {
+        InvariantCheckResult result = guard.check(context(
+                "Объясни четыре благородные истины",
+                planningState("Согласование плана", "предложить план")));
+        assertTrue(result.hardBlock());
+        assertTrue(result.hardBlocked().stream().anyMatch(r ->
+                "INV-BIZ-02".equals(r.id()) || "INV-BIZ-04".equals(r.id())));
     }
 
     @Test

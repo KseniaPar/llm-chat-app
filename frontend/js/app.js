@@ -47,6 +47,11 @@ const taskExpectedAction = document.getElementById('task-expected-action');
 const taskPausedLabel = document.getElementById('task-paused-label');
 const taskPauseBtn = document.getElementById('task-pause-btn');
 const taskResumeBtn = document.getElementById('task-resume-btn');
+const transitionsPanel = document.getElementById('transitions-panel');
+const transitionsAllowedBadge = document.getElementById('transitions-allowed-badge');
+const transitionsAllowedEl = document.getElementById('transitions-allowed');
+const transitionsList = document.getElementById('transitions-list');
+const transitionsEmpty = document.getElementById('transitions-empty');
 const invariantsList = document.getElementById('invariants-list');
 const invariantsCountBadge = document.getElementById('invariants-count-badge');
 
@@ -93,6 +98,11 @@ async function apiFetch(url, options = {}) {
     throw new Error(message);
   }
   return response;
+}
+
+async function apiFetchOptional(url, options = {}) {
+  const headers = getAuthHeaders(options.headers || {});
+  return fetch(url, { ...options, headers });
 }
 
 function forceReauth(message) {
@@ -154,7 +164,7 @@ async function handleAuthSubmit(event) {
     localStorage.setItem(JWT_STORAGE_KEY, authToken);
     localStorage.setItem(AUTH_USER_STORAGE_KEY, authUsernameValue);
     hideAuthOverlay();
-    await Promise.all([restoreSessionFromStorage(), loadProfile(), loadTaskState(), loadInvariants()]);
+    await Promise.all([restoreSessionFromStorage(), loadProfile(), loadTaskState(), loadTransitions(), loadInvariants()]);
     promptInput?.focus();
   } catch (error) {
     if (authError) {
@@ -280,6 +290,78 @@ async function loadTaskState() {
   }
 }
 
+function formatTransitionTime(iso) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch {
+    return '—';
+  }
+}
+
+function renderTransitionsPanel(allowedData, historyData) {
+  if (!transitionsPanel) return;
+  const allowed = allowedData?.allowedLabels || allowedData?.allowed || [];
+  const items = historyData?.transitions || [];
+
+  if (transitionsAllowedBadge) {
+    transitionsAllowedBadge.textContent = String(allowed.length);
+  }
+  if (transitionsAllowedEl) {
+    transitionsAllowedEl.innerHTML = allowed.length
+      ? allowed.map((label) => `<span class="transitions-panel__chip">${escapeHtml(label)}</span>`).join('')
+      : '<span class="transitions-panel__chip transitions-panel__chip--muted">нет активной задачи</span>';
+  }
+
+  transitionsEmpty?.classList.toggle('hidden', items.length > 0);
+  if (transitionsList) {
+    transitionsList.innerHTML = items.length
+      ? items
+          .map((item) => {
+            const statusClass = item.accepted ? 'transitions-panel__item--ok' : 'transitions-panel__item--reject';
+            const statusMark = item.accepted ? '✓' : '✗';
+            const phaseLine = [item.fromPhase, item.toPhase].filter(Boolean).join(' → ') || '—';
+            const codePrefix = !item.accepted && item.rejectionCode ? `${item.rejectionCode}: ` : '';
+            const reason = item.rejectionReason
+              ? `<p class="transitions-panel__reason">${escapeHtml(item.rejectionReason)}</p>`
+              : '';
+            return `<li class="transitions-panel__item ${statusClass}">
+              <div class="transitions-panel__head">
+                <span class="transitions-panel__status">${statusMark}</span>
+                <span class="transitions-panel__type">${escapeHtml(item.transitionLabel || item.transitionType || '')}</span>
+                <span class="transitions-panel__time">${formatTransitionTime(item.createdAt)}</span>
+              </div>
+              <p class="transitions-panel__phase">${escapeHtml(codePrefix + phaseLine)}</p>
+              ${reason}
+            </li>`;
+          })
+          .join('')
+      : '';
+  }
+}
+
+async function loadTransitions() {
+  if (!sessionId || !getAuthToken()) {
+    renderTransitionsPanel(null, null);
+    return;
+  }
+  try {
+    const [allowedRes, historyRes] = await Promise.all([
+      apiFetchOptional(`/api/agent/task/transitions/allowed?sessionId=${encodeURIComponent(sessionId)}`),
+      apiFetchOptional(`/api/agent/task/transitions?sessionId=${encodeURIComponent(sessionId)}&limit=30`),
+    ]);
+    if (allowedRes.status === 401 || allowedRes.status === 403 || historyRes.status === 401 || historyRes.status === 403) {
+      renderTransitionsPanel(null, null);
+      return;
+    }
+    const allowedData = allowedRes.ok ? await allowedRes.json() : null;
+    const historyData = historyRes.ok ? await historyRes.json() : null;
+    renderTransitionsPanel(allowedData, historyData);
+  } catch {
+    renderTransitionsPanel(null, null);
+  }
+}
+
 function renderInvariantsPanel(rules) {
   if (!invariantsList) return;
   const items = rules || [];
@@ -314,30 +396,16 @@ async function loadInvariants() {
 }
 
 async function pauseTask() {
-  if (!sessionId) return;
-  try {
-    const response = await apiFetch('/api/agent/task/pause', {
-      method: 'POST',
-      body: JSON.stringify({ sessionId }),
-    });
-    if (!response.ok) throw new Error(await parseErrorResponse(response));
-    renderTaskPanel(await response.json());
-  } catch (error) {
-    showError(error.message);
+  const result = await postTaskPause();
+  if (!result.ok) {
+    showError(result.error);
   }
 }
 
 async function resumeTask() {
-  if (!sessionId) return;
-  try {
-    const response = await apiFetch('/api/agent/task/resume', {
-      method: 'POST',
-      body: JSON.stringify({ sessionId }),
-    });
-    if (!response.ok) throw new Error(await parseErrorResponse(response));
-    renderTaskPanel(await response.json());
-  } catch (error) {
-    showError(error.message);
+  const result = await postTaskResume();
+  if (!result.ok) {
+    showError(result.error);
   }
 }
 
@@ -448,6 +516,48 @@ function initMemoryTabs() {
       memoryTabLong?.classList.toggle('hidden', target !== 'long');
     });
   });
+}
+
+async function postTaskPause() {
+  if (!sessionId) {
+    return { ok: false, error: 'Нет активной сессии' };
+  }
+  try {
+    const response = await apiFetch('/api/agent/task/pause', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    });
+    if (!response.ok) {
+      return { ok: false, error: await parseErrorResponse(response) };
+    }
+    const task = await response.json();
+    renderTaskPanel(task);
+    await loadTransitions();
+    return { ok: true, task };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
+
+async function postTaskResume() {
+  if (!sessionId) {
+    return { ok: false, error: 'Нет активной сессии' };
+  }
+  try {
+    const response = await apiFetch('/api/agent/task/resume', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    });
+    if (!response.ok) {
+      return { ok: false, error: await parseErrorResponse(response) };
+    }
+    const task = await response.json();
+    renderTaskPanel(task);
+    await loadTransitions();
+    return { ok: true, task };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
 }
 
 function setControlsDisabled(isDisabled) {
@@ -688,7 +798,7 @@ async function startNewDialog() {
   }
 }
 
-async function sendMessage(prompt) {
+async function sendMessage(prompt, options = {}) {
   const requestId = ++activeRequestId;
   setControlsDisabled(true);
   appendMessage('user', prompt);
@@ -703,7 +813,7 @@ async function sendMessage(prompt) {
       body: JSON.stringify(payload),
     });
 
-    if (requestId !== activeRequestId) return false;
+    if (requestId !== activeRequestId) return { ok: false, error: 'Запрос отменён' };
     if (!response.ok) throw new Error(await parseErrorResponse(response));
 
     const data = await response.json();
@@ -736,18 +846,22 @@ async function sendMessage(prompt) {
     } else {
       await loadTaskState();
     }
+    await loadTransitions();
 
     setLoading(false);
-    await appendMessageGradually('assistant', data.response || 'Пустой ответ.');
-    return true;
+    if (options.skipTyping) {
+      appendMessage('assistant', data.response || 'Пустой ответ.');
+    } else {
+      await appendMessageGradually('assistant', data.response || 'Пустой ответ.');
+    }
+    return { ok: true, data };
   } catch (error) {
-    if (requestId !== activeRequestId) return false;
-    showError(
-      error.message.includes('Failed to fetch')
-        ? 'Не удалось связаться с backend. Убедитесь, что Spring Boot запущен на порту 8080.'
-        : error.message,
-    );
-    return false;
+    if (requestId !== activeRequestId) return { ok: false, error: 'Запрос отменён' };
+    const message = error.message.includes('Failed to fetch')
+      ? 'Не удалось связаться с backend. Убедитесь, что Spring Boot запущен на порту 8080.'
+      : error.message;
+    showError(message);
+    return { ok: false, error: message };
   } finally {
     if (requestId === activeRequestId) {
       setLoading(false);
@@ -795,7 +909,7 @@ resizeInput();
 
 if (getAuthToken()) {
   hideAuthOverlay();
-  Promise.all([restoreSessionFromStorage(), loadProfile(), loadTaskState(), loadInvariants()]).finally(() =>
+  Promise.all([restoreSessionFromStorage(), loadProfile(), loadTaskState(), loadTransitions(), loadInvariants()]).finally(() =>
     promptInput.focus(),
   );
 } else {

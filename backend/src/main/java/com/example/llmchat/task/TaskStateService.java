@@ -25,10 +25,14 @@ public class TaskStateService {
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
 
     private final TaskStateRepository taskStateRepository;
+    private final TaskTransitionService taskTransitionService;
     private final ConcurrentHashMap<String, TaskState> pendingBySession = new ConcurrentHashMap<>();
 
-    public TaskStateService(TaskStateRepository taskStateRepository) {
+    public TaskStateService(
+            TaskStateRepository taskStateRepository,
+            TaskTransitionService taskTransitionService) {
         this.taskStateRepository = taskStateRepository;
+        this.taskTransitionService = taskTransitionService;
     }
 
     public void promotePendingState(String sessionId) {
@@ -52,7 +56,7 @@ public class TaskStateService {
         return taskStateRepository.findBySessionId(sessionId);
     }
 
-    public Optional<TaskState> bootstrapPlanningIfNeeded(String sessionId, String userMessage) {
+    public Optional<TransitionResult> bootstrapPlanningIfNeeded(String sessionId, String userMessage) {
         if (sessionId == null || sessionId.isBlank()) {
             return Optional.empty();
         }
@@ -63,7 +67,13 @@ public class TaskStateService {
             return Optional.empty();
         }
         TaskState initial = TaskState.initialPlanning(sessionId, inferTaskTitle(userMessage));
-        return Optional.of(taskStateRepository.upsert(initial));
+        TransitionResult result = taskTransitionService.apply(
+                sessionId,
+                TaskTransitionRequest.of(
+                        TaskTransitionType.START_PLANNING,
+                        TaskTransitionTriggerSource.RULE,
+                        initial));
+        return result.accepted() ? Optional.of(result) : Optional.empty();
     }
 
     public boolean looksLikeStudyTaskStart(String userMessage) {
@@ -81,7 +91,10 @@ public class TaskStateService {
         return trimmed.substring(0, 77) + "...";
     }
 
-    public Optional<TaskState> advancePlanningSubPhase(String sessionId, String userMessage, int priorMessageCount) {
+    public Optional<TransitionResult> advancePlanningSubPhase(
+            String sessionId,
+            String userMessage,
+            int priorMessageCount) {
         Optional<TaskState> existing = taskStateRepository.findBySessionId(sessionId);
         if (existing.isEmpty() || existing.get().phase() != TaskPhase.PLANNING) {
             return Optional.empty();
@@ -93,18 +106,18 @@ public class TaskStateService {
         if (priorMessageCount < 2 || userMessage == null || userMessage.trim().length() < 20) {
             return Optional.empty();
         }
-        TaskState agreement = new TaskState(
+        TaskState agreement = taskTransitionService.buildPlanningAgreementState(state);
+        TransitionResult result = taskTransitionService.apply(
                 sessionId,
-                TaskPhase.PLANNING,
-                PlanningSteps.AGREEMENT,
-                "Кратко предложить план из 3–5 пунктов и спросить: «Начнём по этому плану?»",
-                state.paused(),
-                state.taskTitle(),
-                state.updatedAt());
-        return Optional.of(taskStateRepository.upsert(agreement));
+                TaskTransitionRequest.withContext(
+                        TaskTransitionType.ADVANCE_PLANNING_SUBPHASE,
+                        TaskTransitionTriggerSource.RULE,
+                        agreement,
+                        TaskTransitionContext.forRule(userMessage, priorMessageCount)));
+        return result.accepted() ? Optional.of(result) : Optional.empty();
     }
 
-    public Optional<TaskState> confirmExecutionIfReady(String sessionId, String userMessage) {
+    public Optional<TransitionResult> confirmExecutionIfReady(String sessionId, String userMessage) {
         Optional<TaskState> existing = taskStateRepository.findBySessionId(sessionId);
         if (existing.isEmpty()) {
             return Optional.empty();
@@ -115,18 +128,18 @@ public class TaskStateService {
                 || !TaskStateTransitions.readyForExecution(userMessage, state)) {
             return Optional.empty();
         }
-        TaskState execution = new TaskState(
+        TaskState execution = taskTransitionService.buildExecutionState(state);
+        TransitionResult result = taskTransitionService.apply(
                 sessionId,
-                TaskPhase.EXECUTION,
-                "Разбор тем: первая тема по плану",
-                "Объяснить первую тему из согласованного плана",
-                state.paused(),
-                state.taskTitle(),
-                state.updatedAt());
-        return Optional.of(taskStateRepository.upsert(execution));
+                TaskTransitionRequest.withContext(
+                        TaskTransitionType.APPROVE_PLAN_TO_EXECUTION,
+                        TaskTransitionTriggerSource.RULE,
+                        execution,
+                        TaskTransitionContext.forRule(userMessage, 0)));
+        return result.accepted() ? Optional.of(result) : Optional.empty();
     }
 
-    public Optional<TaskState> startValidationIfReady(String sessionId, String userMessage) {
+    public Optional<TransitionResult> startValidationIfReady(String sessionId, String userMessage) {
         if (!TaskStateTransitions.readyForValidation(userMessage)) {
             return Optional.empty();
         }
@@ -134,19 +147,18 @@ public class TaskStateService {
         if (existing.isEmpty() || existing.get().phase() != TaskPhase.EXECUTION) {
             return Optional.empty();
         }
-        TaskState state = existing.get();
-        TaskState validation = new TaskState(
+        TaskState validation = taskTransitionService.buildValidationState(existing.get());
+        TransitionResult result = taskTransitionService.apply(
                 sessionId,
-                TaskPhase.VALIDATION,
-                "Самопроверка: вопрос 1 из 3",
-                "Задать первый вопрос с вариантами A, B, C, D по пройденному материалу",
-                state.paused(),
-                state.taskTitle(),
-                state.updatedAt());
-        return Optional.of(taskStateRepository.upsert(validation));
+                TaskTransitionRequest.withContext(
+                        TaskTransitionType.EXECUTION_TO_VALIDATION,
+                        TaskTransitionTriggerSource.RULE,
+                        validation,
+                        TaskTransitionContext.forRule(userMessage, 0)));
+        return result.accepted() ? Optional.of(result) : Optional.empty();
     }
 
-    public Optional<TaskState> advanceValidationAfterMcqAnswer(String sessionId, String userMessage) {
+    public Optional<TransitionResult> advanceValidationAfterMcqAnswer(String sessionId, String userMessage) {
         if (!TaskStateTransitions.isMcqAnswer(userMessage)) {
             return Optional.empty();
         }
@@ -176,10 +188,16 @@ public class TaskStateService {
                 state.paused(),
                 state.taskTitle(),
                 state.updatedAt());
-        return Optional.of(taskStateRepository.upsert(advanced));
+        TransitionResult result = taskTransitionService.apply(
+                sessionId,
+                TaskTransitionRequest.of(
+                        TaskTransitionType.UPDATE_IN_PHASE,
+                        TaskTransitionTriggerSource.RULE,
+                        advanced));
+        return result.accepted() ? Optional.of(result) : Optional.empty();
     }
 
-    public Optional<TaskState> autoAdvanceToValidationIfReady(String sessionId) {
+    public Optional<TransitionResult> autoAdvanceToValidationIfReady(String sessionId) {
         Optional<TaskState> existing = taskStateRepository.findBySessionId(sessionId);
         if (existing.isEmpty() || existing.get().phase() != TaskPhase.EXECUTION || existing.get().paused()) {
             return Optional.empty();
@@ -188,10 +206,18 @@ public class TaskStateService {
         if (!TaskStateTransitions.executionComplete(state)) {
             return Optional.empty();
         }
-        return Optional.of(taskStateRepository.upsert(toValidationState(state)));
+        TaskState validation = taskTransitionService.buildValidationState(state);
+        TransitionResult result = taskTransitionService.apply(
+                sessionId,
+                TaskTransitionRequest.withContext(
+                        TaskTransitionType.EXECUTION_TO_VALIDATION,
+                        TaskTransitionTriggerSource.AUTO,
+                        validation,
+                        TaskTransitionContext.forAuto()));
+        return result.accepted() ? Optional.of(result) : Optional.empty();
     }
 
-    public Optional<TaskState> autoAdvanceToDoneIfReady(String sessionId) {
+    public Optional<TransitionResult> autoAdvanceToDoneIfReady(String sessionId) {
         Optional<TaskState> existing = taskStateRepository.findBySessionId(sessionId);
         if (existing.isEmpty() || existing.get().phase() != TaskPhase.VALIDATION || existing.get().paused()) {
             return Optional.empty();
@@ -200,59 +226,49 @@ public class TaskStateService {
         if (!TaskStateTransitions.validationReadyToFinish(state)) {
             return Optional.empty();
         }
-        return Optional.of(taskStateRepository.upsert(toDoneState(state)));
+        TaskState done = taskTransitionService.buildDoneState(state);
+        TransitionResult result = taskTransitionService.apply(
+                sessionId,
+                TaskTransitionRequest.withContext(
+                        TaskTransitionType.VALIDATION_TO_DONE,
+                        TaskTransitionTriggerSource.AUTO,
+                        done,
+                        TaskTransitionContext.forAuto()));
+        return result.accepted() ? Optional.of(result) : Optional.empty();
     }
 
     public TaskState toValidationState(TaskState base) {
-        return new TaskState(
-                base.sessionId(),
-                TaskPhase.VALIDATION,
-                "Самопроверка: вопрос 1 из 3",
-                "Задать первый вопрос с вариантами A, B, C, D по пройденному материалу",
-                base.paused(),
-                base.taskTitle(),
-                base.updatedAt());
+        return taskTransitionService.buildValidationState(base);
     }
 
     public TaskState toDoneState(TaskState base) {
-        return new TaskState(
-                base.sessionId(),
-                TaskPhase.DONE,
-                "Тема пройдена",
-                "Кратко подвести итог и предложить следующую тему",
-                base.paused(),
-                base.taskTitle(),
-                base.updatedAt());
+        return taskTransitionService.buildDoneState(base);
     }
 
     public TaskState saveState(TaskState state) {
         return taskStateRepository.upsert(state);
     }
 
-    public TaskState pause(String sessionId) {
+    public TransitionResult pause(String sessionId) {
         TaskState current = requireState(sessionId);
-        TaskState paused = new TaskState(
+        TaskState paused = taskTransitionService.buildPausedState(current);
+        return taskTransitionService.apply(
                 sessionId,
-                current.phase(),
-                current.currentStep(),
-                "Ожидание возобновления студентом",
-                true,
-                current.taskTitle(),
-                current.updatedAt());
-        return taskStateRepository.upsert(paused);
+                TaskTransitionRequest.of(
+                        TaskTransitionType.PAUSE,
+                        TaskTransitionTriggerSource.USER_API,
+                        paused));
     }
 
-    public TaskState resume(String sessionId) {
+    public TransitionResult resume(String sessionId) {
         TaskState current = requireState(sessionId);
-        TaskState resumed = new TaskState(
+        TaskState resumed = taskTransitionService.buildResumedState(current);
+        return taskTransitionService.apply(
                 sessionId,
-                current.phase(),
-                current.currentStep(),
-                restoreExpectedAction(current),
-                false,
-                current.taskTitle(),
-                current.updatedAt());
-        return taskStateRepository.upsert(resumed);
+                TaskTransitionRequest.of(
+                        TaskTransitionType.RESUME,
+                        TaskTransitionTriggerSource.USER_API,
+                        resumed));
     }
 
     public PauseResumeCommand detectCommand(String prompt) {
@@ -269,7 +285,7 @@ public class TaskStateService {
         return PauseResumeCommand.NONE;
     }
 
-    public String formatTaskBlock(TaskState state) {
+    public String formatTaskBlock(TaskState state, List<TaskTransitionType> allowedTransitions) {
         if (state == null) {
             return null;
         }
@@ -282,6 +298,14 @@ public class TaskStateService {
         builder.append("- Текущий шаг: ").append(state.currentStep().trim()).append("\n");
         builder.append("- Ожидаемое действие: ").append(state.expectedAction().trim()).append("\n");
         builder.append("- Пауза: ").append(state.paused() ? "да" : "нет").append("\n");
+        if (allowedTransitions != null && !allowedTransitions.isEmpty()) {
+            builder.append("- Допустимые переходы: ");
+            builder.append(allowedTransitions.stream()
+                    .map(TaskTransitionType::name)
+                    .reduce((a, b) -> a + ", " + b)
+                    .orElse(""));
+            builder.append("\n");
+        }
         builder.append(planningPhaseRules(state));
         builder.append(phaseRules(state.phase()));
         builder.append("""
@@ -290,8 +314,13 @@ public class TaskStateService {
                 - При паузе не переходи к новому материалу; кратко напомни текущий шаг (1 предложение).
                 - При возобновлении НЕ повторяй уже объяснённое — продолжай с текущего шага.
                 - Следуй ожидаемому действию текущего этапа.
+                - Не переходи к этапу, которого нет в списке допустимых переходов.
                 """);
         return builder.toString().trim();
+    }
+
+    public String formatTaskBlock(TaskState state) {
+        return formatTaskBlock(state, null);
     }
 
     private String planningPhaseRules(TaskState state) {
@@ -383,20 +412,6 @@ public class TaskStateService {
     private TaskState requireState(String sessionId) {
         return taskStateRepository.findBySessionId(sessionId)
                 .orElseThrow(() -> new IllegalArgumentException("Состояние задачи не найдено для сессии."));
-    }
-
-    private String restoreExpectedAction(TaskState current) {
-        if (current.paused()) {
-            return switch (current.phase()) {
-                case PLANNING -> PlanningSteps.isAgreement(current.currentStep(), current.expectedAction())
-                        ? "Кратко предложить план и спросить подтверждение"
-                        : "Задать уточняющие вопросы и согласовать план перед разбором";
-                case EXECUTION -> "Продолжить разбор текущей темы";
-                case VALIDATION -> "Задать один вопрос с вариантами A, B, C, D";
-                case DONE -> "Подвести итог и предложить следующую тему";
-            };
-        }
-        return current.expectedAction();
     }
 
     public enum PauseResumeCommand {

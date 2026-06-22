@@ -16,16 +16,20 @@ import java.util.regex.Pattern;
 @Component
 public class InvariantGuard {
 
+    private static final String WORD_START = "(?:^|[\\s,.!?;:—–-])\\s*";
     private static final Pattern MATERIAL_REQUEST = Pattern.compile(
-            "\\b(объясни|расскажи|разбери|поясни|опиши|расскажи\\s+про|разбор\\s+тем)\\b",
+            WORD_START + "(?:объясни|расскажи|разбери|поясни|опиши|расскажи\\s+про|разбор\\s+тем)",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern ACADEMIC_CHEAT = Pattern.compile(
             "\\b(спиши|напиши\\s+за\\s+меня|готов(?:ое|ую|ый)?\\s+(?:эссе|работу|ответ)|"
                     + "для\\s+сдачи|сдай\\s+за\\s+меня)\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern EARLY_MCQ_REQUEST = Pattern.compile(
-            "\\b(самопровер|тест\\s+(?:с\\s+)?вариант|вариант(?:ы|ами)?\\s+[A-Da-dА-Га-г]|"
-                    + "[A-Da-dА-Га-г]\\s*[)\\.]?\\s*[A-Da-dА-Га-г])\\b",
+            "(?:^|[\\s,.!?;:—–-])"
+                    + "(?:самопровер|задай\\s+(?:\\d+\\s+)?тест|тест\\s+(?:с\\s+)?вариант|"
+                    + "вариант(?:ы|ами)?\\s+[A-Da-dА-Га-г]|"
+                    + "тест\\s+[A-Da-dА-Га-г](?:\\s+[A-Da-dА-Га-г]){2,3}|"
+                    + "[A-Da-dА-Га-г]\\s*[)\\.]?\\s*[A-Da-dА-Га-г])",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern PHASE_ROLLBACK = Pattern.compile(
             "верн[^\\s]*\\s+к\\s+разбор|ещё\\s+раз\\s+(?:объясни|разбери)|начни\\s+разбор\\s+заново|верн[^\\s]*\\s+к\\s+темам",
@@ -34,8 +38,8 @@ public class InvariantGuard {
             "перескоч|пропуст(?:им|ить)|сразу\\s+к\\s+(?:теме|пункту)|перейд[^\\s]*\\s+к\\s+теме",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern BULK_LECTURE = Pattern.compile(
-            "\\b(сразу\\s+(?:расскажи|объясни|разбери)|все\\s+\\d+\\s+тем|"
-                    + "полн(?:ый|ую)\\s+(?:разбор|лекцию)|весь\\s+материал|все\\s+темы\\s+лекции)\\b",
+            WORD_START + "(?:сразу\\s+(?:расскажи|объясни|разбери)|все\\s+\\d+\\s+тем|"
+                    + "полн(?:ый|ую)\\s+(?:разбор|лекцию)|весь\\s+материал|все\\s+темы\\s+лекции)",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern LONG_CONTENT_REQUEST = Pattern.compile(
             "\\b(развёрнут|развернут|на\\s+\\d+\\s+страниц|большой\\s+конспект|"
@@ -48,12 +52,24 @@ public class InvariantGuard {
     private static final Pattern BRIEF_CONSTRAINT = Pattern.compile(
             "\\b(кратко|до\\s+\\d+\\s+предложен|без\\s+воды|коротко)\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private static final Pattern FINISH_WITHOUT_VALIDATION = Pattern.compile(
+            WORD_START
+                    + "(?:законч(?:и|ить|им)(?:\\s+(?:задач(?:у|и|ей|a)?|урок|занят(?:ие|ия)?))?"
+                    + "|заверш(?:и|ить|им)(?:\\s+(?:задач(?:у|и|ей|a)?|урок|занят(?:ие|ия)?))?"
+                    + "|(?:законч|заверш)(?:и|ить|им)?\\s+без\\s+(?:теста|самопровер(?:ки|ку|им)?|проверк(?:и|у|им)?)"
+                    + "|(?:всё|все)\\s+понял"
+                    + "|можно\\s+заканчивать"
+                    + "|финал"
+                    + "|готово\\s+(?:всё|все))",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
 
-    private final InvariantsRegistry registry;
+    private final InvariantsService invariantsService;
     private final TaskStateService taskStateService;
 
-    public InvariantGuard(InvariantsRegistry registry, TaskStateService taskStateService) {
-        this.registry = registry;
+    public InvariantGuard(
+            InvariantsService invariantsService,
+            TaskStateService taskStateService) {
+        this.invariantsService = invariantsService;
         this.taskStateService = taskStateService;
     }
 
@@ -62,7 +78,7 @@ public class InvariantGuard {
         List<InvariantDefinition> hardBlocked = new ArrayList<>();
         List<String> softHints = new ArrayList<>();
 
-        for (InvariantDefinition rule : registry.all()) {
+        for (InvariantDefinition rule : invariantsService.resolveActive(context)) {
             if (!isViolation(rule, context)) {
                 continue;
             }
@@ -113,6 +129,7 @@ public class InvariantGuard {
             case ACADEMIC_INTEGRITY -> ACADEMIC_CHEAT.matcher(message.trim()).find();
             case PHASE_ROLLBACK_REQUEST -> matchesPhaseRollback(taskState, message);
             case SKIP_TOPIC_IN_EXECUTION -> matchesSkipTopic(taskState, message);
+            case FINISH_WITHOUT_VALIDATION -> matchesFinishWithoutValidation(taskState, message);
             case LECTURE_DURING_VALIDATION -> matchesLectureDuringValidation(taskState, message);
             case STRUCTURED_PREP_WITHOUT_PLANNING -> matchesStructuredPrepWithoutPlanning(context, taskState, message);
             case PROFILE_CONSTRAINT_VIOLATION -> matchesProfileConstraintViolation(context.profile(), message);
@@ -191,6 +208,20 @@ public class InvariantGuard {
             return false;
         }
         return SKIP_TOPIC.matcher(message.trim()).find();
+    }
+
+    private boolean matchesFinishWithoutValidation(Optional<TaskState> taskState, String message) {
+        if (taskState.isEmpty() || !FINISH_WITHOUT_VALIDATION.matcher(message.trim()).find()) {
+            return false;
+        }
+        TaskState state = taskState.get();
+        if (state.phase() == TaskPhase.DONE) {
+            return false;
+        }
+        if (state.phase() == TaskPhase.VALIDATION) {
+            return !TaskStateTransitions.validationReadyToFinish(state);
+        }
+        return state.phase() == TaskPhase.PLANNING || state.phase() == TaskPhase.EXECUTION;
     }
 
     private boolean matchesLectureDuringValidation(Optional<TaskState> taskState, String message) {
