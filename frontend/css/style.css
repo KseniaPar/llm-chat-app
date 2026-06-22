@@ -1466,3 +1466,127 @@ body {
   font-size: 0.75rem;
   color: var(--text-muted);
 }
+
+.transitions-panel {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.transitions-panel__title {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.transitions-panel__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.transitions-panel__allowed {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.transitions-panel__chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  background: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
+.transitions-panel__chip--muted {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+.transitions-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.transitions-panel__item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.72rem;
+}
+
+.transitions-panel__item:last-child {
+  border-bottom: none;
+}
+
+.transitions-panel__item--reject {
+  background: #fef2f2;
+  margin: 0 -8px;
+  padding: 8px;
+  border-radius: 6px;
+}
+
+.transitions-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.transitions-panel__status {
+  font-weight: 700;
+  width: 1rem;
+}
+
+.transitions-panel__item--ok .transitions-panel__status {
+  color: #15803d;
+}
+
+.transitions-panel__item--reject .transitions-panel__status {
+  color: #b91c1c;
+}
+
+.transitions-panel__type {
+  font-weight: 600;
+  flex: 1;
+}
+
+.transitions-panel__time {
+  color: var(--text-muted);
+  font-size: 0.65rem;
+}
+
+.transitions-panel__phase {
+  margin: 4px 0 0 1.25rem;
+  color: var(--text-muted);
+}
+
+.transitions-panel__reason {
+  margin: 4px 0 0 1.25rem;
+  color: #b91c1c;
+}
+
+.transitions-panel__empty {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.transitions-panel__empty.hidden {
+  display: none;
+}

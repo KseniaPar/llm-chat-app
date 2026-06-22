@@ -8,7 +8,6 @@ import com.example.llmchat.dto.MemoryContextSnapshot;
 import com.example.llmchat.dto.TaskStateSnapshot;
 import com.example.llmchat.dto.TokenStats;
 import com.example.llmchat.dto.UserProfileSnapshot;
-import com.example.llmchat.dto.UserProfileSnapshot;
 import com.example.llmchat.invariants.InvariantCheckResult;
 import com.example.llmchat.invariants.InvariantContext;
 import com.example.llmchat.invariants.InvariantGuard;
@@ -20,6 +19,8 @@ import com.example.llmchat.personalization.UserProfile;
 import com.example.llmchat.task.TaskState;
 import com.example.llmchat.task.TaskStateService;
 import com.example.llmchat.task.TaskStateUpdaterService;
+import com.example.llmchat.task.TaskTransitionService;
+import com.example.llmchat.task.TransitionResult;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -45,6 +46,7 @@ public class ChatAgent {
     private final MemoryManager memoryManager;
     private final TaskStateService taskStateService;
     private final TaskStateUpdaterService taskStateUpdaterService;
+    private final TaskTransitionService taskTransitionService;
     private final InvariantGuard invariantGuard;
     private final InvariantsService invariantsService;
     private final PersonalizationService personalizationService;
@@ -64,6 +66,7 @@ public class ChatAgent {
             MemoryManager memoryManager,
             TaskStateService taskStateService,
             TaskStateUpdaterService taskStateUpdaterService,
+            TaskTransitionService taskTransitionService,
             InvariantGuard invariantGuard,
             InvariantsService invariantsService,
             PersonalizationService personalizationService,
@@ -81,6 +84,7 @@ public class ChatAgent {
         this.memoryManager = memoryManager;
         this.taskStateService = taskStateService;
         this.taskStateUpdaterService = taskStateUpdaterService;
+        this.taskTransitionService = taskTransitionService;
         this.invariantGuard = invariantGuard;
         this.invariantsService = invariantsService;
         this.personalizationService = personalizationService;
@@ -114,57 +118,44 @@ public class ChatAgent {
         TaskStateService.PauseResumeCommand command = taskStateService.detectCommand(prompt);
         if (command == TaskStateService.PauseResumeCommand.PAUSE) {
             if (taskStateService.getState(activeSessionId).isPresent()) {
-                TaskState paused = taskStateService.pause(activeSessionId);
-                taskStateLogs.add("TASK → пауза включена");
-                taskStateLogs.addAll(taskStateService.buildTaskStateLogs(paused, false));
+                appendTransitionLog(taskStateLogs, taskStateService.pause(activeSessionId));
             } else {
                 taskStateLogs.add("TASK → пауза: задача ещё не начата");
             }
         } else if (command == TaskStateService.PauseResumeCommand.RESUME) {
             if (taskStateService.getState(activeSessionId).isPresent()) {
-                TaskState resumed = taskStateService.resume(activeSessionId);
-                taskStateLogs.add("TASK → продолжение");
-                taskStateLogs.addAll(taskStateService.buildTaskStateLogs(resumed, false));
+                appendTransitionLog(taskStateLogs, taskStateService.resume(activeSessionId));
             } else {
                 taskStateLogs.add("TASK → продолжение: задача ещё не начата");
             }
         }
 
-        taskStateService.bootstrapPlanningIfNeeded(activeSessionId, prompt).ifPresent(state -> {
-            taskStateLogs.add("TASK → задача начата до ответа (этап: Подготовка плана)");
-            taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
-        });
+        taskStateService.bootstrapPlanningIfNeeded(activeSessionId, prompt)
+                .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → задача начата"));
 
         int priorMessages = conversationStore.getStoredMessageCount(activeSessionId);
-        taskStateService.advancePlanningSubPhase(activeSessionId, prompt, priorMessages).ifPresent(state -> {
-            taskStateLogs.add("TASK → переход к согласованию плана");
-            taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
-        });
+        Optional<TransitionResult> skipAudit = taskTransitionService.auditUserSkipAttempt(activeSessionId, prompt);
+        skipAudit.ifPresent(result -> appendTransitionLog(taskStateLogs, result));
 
-        taskStateService.confirmExecutionIfReady(activeSessionId, prompt).ifPresent(state -> {
-            taskStateLogs.add("TASK → переход к разбору тем");
-            taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
-        });
+        if (skipAudit.isEmpty()) {
+            taskStateService.advancePlanningSubPhase(activeSessionId, prompt, priorMessages)
+                    .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → переход к согласованию плана"));
 
-        taskStateService.startValidationIfReady(activeSessionId, prompt).ifPresent(state -> {
-            taskStateLogs.add("TASK → переход к самопроверке");
-            taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
-        });
+            taskStateService.confirmExecutionIfReady(activeSessionId, prompt)
+                    .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → переход к разбору тем"));
 
-        taskStateService.advanceValidationAfterMcqAnswer(activeSessionId, prompt).ifPresent(state -> {
-            taskStateLogs.add("TASK → следующий вопрос самопроверки");
-            taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
-        });
+            taskStateService.startValidationIfReady(activeSessionId, prompt)
+                    .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → переход к самопроверке"));
+        }
 
-        taskStateService.autoAdvanceToValidationIfReady(activeSessionId).ifPresent(state -> {
-            taskStateLogs.add("TASK → авто: самопроверка");
-            taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
-        });
+        taskStateService.advanceValidationAfterMcqAnswer(activeSessionId, prompt)
+                .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → следующий вопрос самопроверки"));
 
-        taskStateService.autoAdvanceToDoneIfReady(activeSessionId).ifPresent(state -> {
-            taskStateLogs.add("TASK → авто: тема пройдена");
-            taskStateLogs.addAll(taskStateService.buildTaskStateLogs(state, true));
-        });
+        taskStateService.autoAdvanceToValidationIfReady(activeSessionId)
+                .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → авто: самопроверка"));
+
+        taskStateService.autoAdvanceToDoneIfReady(activeSessionId)
+                .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → авто: тема пройдена"));
 
         UserProfile profile = personalizationService.getProfile(userId);
         Optional<TaskState> taskStateForGuard = taskStateService.getState(activeSessionId);
@@ -270,7 +261,10 @@ public class ChatAgent {
                     updatedFacts,
                     recent).ifPresent(updated -> {
                 taskStateLogs.add("TASK → состояние для следующего хода обновлено (LLM)");
-                taskStateLogs.addAll(taskStateService.buildTaskStateLogs(updated, false));
+                for (TransitionResult transitionResult : updated.transitionResults()) {
+                    appendTransitionLog(taskStateLogs, transitionResult);
+                }
+                taskStateLogs.addAll(taskStateService.buildTaskStateLogs(updated.state(), false));
             });
         }
 
@@ -348,6 +342,23 @@ public class ChatAgent {
                 List.copyOf(taskStateLogs),
                 assembled.invariantsSnapshot(),
                 List.copyOf(assembled.invariantLogs()));
+    }
+
+    private void appendTransitionLog(List<String> logs, TransitionResult result) {
+        appendTransitionLog(logs, result, null);
+    }
+
+    private void appendTransitionLog(List<String> logs, TransitionResult result, String acceptedPrefix) {
+        if (result == null) {
+            return;
+        }
+        if (result.accepted() && acceptedPrefix != null) {
+            logs.add(acceptedPrefix);
+        }
+        logs.add(result.toLogLine());
+        if (result.newState() != null) {
+            logs.addAll(taskStateService.buildTaskStateLogs(result.newState(), result.accepted() && acceptedPrefix != null));
+        }
     }
 
     private AgentResponse buildInvariantRefusalResponse(

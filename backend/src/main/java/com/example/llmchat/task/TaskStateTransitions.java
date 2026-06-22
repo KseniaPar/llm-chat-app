@@ -13,8 +13,10 @@ public final class TaskStateTransitions {
             "\\b(да|ок|хорошо|ладно|угу|верно|давай|подходит|устраивает)\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern READY_FOR_VALIDATION = Pattern.compile(
-            "\\b(провер(?:ь|ить|ка)?\\s*(?:меня|мои\\s+знания)?|самопровер(?:ка|ить|им)?|"
-                    + "задай\\s+(?:\\d+\\s+)?вопрос|протестируй|тест\\s+по|вопросы\\s+для\\s+проверки)\\b",
+            "(?:^|[\\s,.!?;:—–-])"
+                    + "(?:провер(?:ь|ить|ка)?\\s*(?:меня|мои\\s+знания)?|самопровер(?:ка|ить|им)?|"
+                    + "задай\\s+(?:\\d+\\s+)?(?:вопрос|тест)|протестируй|тест\\s+по|"
+                    + "вопросы\\s+для\\s+проверки|тест\\s+[A-Da-dА-Га-г](?:\\s+[A-Da-dА-Га-г]){2,3})",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern MCQ_ANSWER = Pattern.compile(
             "^\\s*([A-Da-dА-Га-гДд])\\s*[).:]?\\s*$",
@@ -56,7 +58,7 @@ public final class TaskStateTransitions {
                 || lower.contains("перейдём к вопрос");
     }
 
-    static boolean validationReadyToFinish(TaskState state) {
+    public static boolean validationReadyToFinish(TaskState state) {
         if (state == null) {
             return false;
         }

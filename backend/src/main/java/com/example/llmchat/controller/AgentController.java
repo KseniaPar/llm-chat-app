@@ -11,12 +11,16 @@ import com.example.llmchat.dto.AgentResetRequest;
 import com.example.llmchat.dto.AgentResponse;
 import com.example.llmchat.dto.MemorySnapshotResponse;
 import com.example.llmchat.dto.InvariantDto;
+import com.example.llmchat.dto.AllowedTransitionsResponse;
+import com.example.llmchat.dto.TaskTransitionDto;
+import com.example.llmchat.dto.TaskTransitionsResponse;
 import com.example.llmchat.dto.TaskSessionRequest;
 import com.example.llmchat.dto.TaskStateResponse;
 import com.example.llmchat.invariants.InvariantsService;
 import com.example.llmchat.memory.MemoryManager;
 import com.example.llmchat.task.TaskState;
 import com.example.llmchat.task.TaskStateService;
+import com.example.llmchat.task.TaskTransitionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -38,6 +42,7 @@ public class AgentController {
     private final ConversationStore conversationStore;
     private final MemoryManager memoryManager;
     private final TaskStateService taskStateService;
+    private final TaskTransitionService taskTransitionService;
     private final InvariantsService invariantsService;
 
     public AgentController(
@@ -45,11 +50,13 @@ public class AgentController {
             ConversationStore conversationStore,
             MemoryManager memoryManager,
             TaskStateService taskStateService,
+            TaskTransitionService taskTransitionService,
             InvariantsService invariantsService) {
         this.chatAgent = chatAgent;
         this.conversationStore = conversationStore;
         this.memoryManager = memoryManager;
         this.taskStateService = taskStateService;
+        this.taskTransitionService = taskTransitionService;
         this.invariantsService = invariantsService;
     }
 
@@ -123,7 +130,7 @@ public class AgentController {
         AuthenticatedUser user = AuthContext.requireUser();
         ensureSessionAccess(request.sessionId(), user.userId());
         log.info("POST /api/agent/task/pause — user: {}, sessionId: {}", user.username(), request.sessionId());
-        return toTaskResponse(taskStateService.pause(request.sessionId()));
+        return toTaskResponse(taskStateService.pause(request.sessionId()).newState());
     }
 
     @PostMapping("/task/resume")
@@ -131,7 +138,26 @@ public class AgentController {
         AuthenticatedUser user = AuthContext.requireUser();
         ensureSessionAccess(request.sessionId(), user.userId());
         log.info("POST /api/agent/task/resume — user: {}, sessionId: {}", user.username(), request.sessionId());
-        return toTaskResponse(taskStateService.resume(request.sessionId()));
+        return toTaskResponse(taskStateService.resume(request.sessionId()).newState());
+    }
+
+    @GetMapping("/task/transitions")
+    public TaskTransitionsResponse taskTransitions(
+            @RequestParam String sessionId,
+            @RequestParam(defaultValue = "50") int limit) {
+        AuthenticatedUser user = AuthContext.requireUser();
+        ensureSessionAccess(sessionId, user.userId());
+        List<TaskTransitionDto> items = taskTransitionService.history(sessionId, limit).stream()
+                .map(TaskTransitionDto::from)
+                .toList();
+        return new TaskTransitionsResponse(items);
+    }
+
+    @GetMapping("/task/transitions/allowed")
+    public AllowedTransitionsResponse allowedTransitions(@RequestParam String sessionId) {
+        AuthenticatedUser user = AuthContext.requireUser();
+        ensureSessionAccess(sessionId, user.userId());
+        return AllowedTransitionsResponse.from(taskTransitionService.allowedNext(sessionId));
     }
 
     private void ensureSessionAccess(String sessionId, String userId) {
