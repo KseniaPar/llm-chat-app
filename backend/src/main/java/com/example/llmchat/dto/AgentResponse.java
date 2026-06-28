@@ -14,5 +14,6 @@ public record AgentResponse(
         TaskStateSnapshot taskStateSnapshot,
         List<String> taskStateLogs,
         InvariantsSnapshot invariantsSnapshot,
-        List<String> invariantLogs) {
+        List<String> invariantLogs,
+        List<McpToolCallLogDto> mcpToolCalls) {
 }

@@ -61,6 +61,15 @@ const mcpSandboxPath = document.getElementById('mcp-sandbox-path');
 const mcpRefreshBtn = document.getElementById('mcp-refresh-btn');
 const mcpToolsList = document.getElementById('mcp-tools-list');
 const mcpToolsEmpty = document.getElementById('mcp-tools-empty');
+const mcpStudyHighlight = document.getElementById('mcp-study-highlight');
+const mcpStudyToolsWrap = document.getElementById('mcp-study-tools-wrap');
+const mcpStudyToolsList = document.getElementById('mcp-study-tools-list');
+const mcpFsToolsWrap = document.getElementById('mcp-fs-tools-wrap');
+const mcpFsToolsList = document.getElementById('mcp-fs-tools-list');
+const mcpFsCount = document.getElementById('mcp-fs-count');
+
+const DEMO_PROMPT =
+  'Найди в учебном справочнике тему про четыре благородные истины и кратко перескажи определение';
 
 const CHAR_DELAY_MS = 18;
 const SESSION_STORAGE_KEY = 'llm-chat-session-id';
@@ -437,25 +446,33 @@ function renderMcpPanel(data) {
   }
 
   const tools = Array.isArray(data?.tools) ? data.tools : [];
-  if (mcpToolsList) {
-    mcpToolsList.innerHTML = tools.length
-      ? tools
-          .map(
-            (tool) => `<li class="mcp-panel__item">
+  const studyTools = tools.filter((t) => t.serverName === 'mcp-study');
+  const fsTools = tools.filter((t) => t.serverName !== 'mcp-study');
+
+  if (mcpStudyHighlight) {
+    mcpStudyHighlight.classList.toggle('hidden', !connected || studyTools.length === 0);
+  }
+
+  const renderToolItem = (tool, study) => `<li class="mcp-panel__item${study ? ' mcp-panel__item--study' : ''}">
           <div class="mcp-panel__head">
             <span class="mcp-panel__name">${escapeHtml(tool.name || '')}</span>
-            <span class="mcp-panel__server">${escapeHtml(tool.serverName || '')}</span>
+            ${!study ? `<span class="mcp-panel__server">${escapeHtml(tool.serverName || '')}</span>` : ''}
           </div>
-          <p class="mcp-panel__desc">${escapeHtml(tool.description || '')}</p>
-          ${
-            tool.inputSchema
-              ? `<details class="mcp-panel__schema"><summary>inputSchema</summary><pre>${escapeHtml(JSON.stringify(tool.inputSchema, null, 2))}</pre></details>`
-              : ''
-          }
-        </li>`,
-          )
-          .join('')
-      : '';
+          <p class="mcp-panel__desc">${escapeHtml((tool.description || '').split('\n')[0])}</p>
+        </li>`;
+
+  if (mcpStudyToolsWrap && mcpStudyToolsList) {
+    mcpStudyToolsWrap.classList.toggle('hidden', studyTools.length === 0);
+    mcpStudyToolsList.innerHTML = studyTools.map((t) => renderToolItem(t, true)).join('');
+  }
+  if (mcpFsToolsWrap && mcpFsToolsList) {
+    mcpFsToolsWrap.classList.toggle('hidden', fsTools.length === 0);
+    mcpFsToolsList.innerHTML = fsTools.map((t) => renderToolItem(t, false)).join('');
+    if (mcpFsCount) mcpFsCount.textContent = fsTools.length ? `(${fsTools.length})` : '';
+  }
+  if (mcpToolsList) {
+    mcpToolsList.classList.add('hidden');
+    mcpToolsList.innerHTML = '';
   }
   if (mcpToolsEmpty) {
     mcpToolsEmpty.classList.toggle('hidden', tools.length > 0);
@@ -704,11 +721,73 @@ async function restoreSessionFromStorage() {
 
 function clearMessages() {
   messagesEl.innerHTML = `
-    <div class="messages-empty">
-      <div class="messages-empty__icon" aria-hidden="true">💬</div>
-      <p>Начните диалог — агент запомнит контекст в трёх слоях памяти</p>
+    <div class="messages-empty" id="demo-panel">
+      <div class="demo-panel">
+        <div class="demo-panel__header">
+          <span class="demo-panel__badge">Day 17</span>
+          <h2 class="demo-panel__title">MCP Tool Calling — демо</h2>
+          <p class="demo-panel__desc">
+            Один клик — агент вызовет <code>searchTopic</code>, прочитает справочник и ответит фактами.
+          </p>
+        </div>
+        <div class="demo-panel__flow" aria-hidden="true">
+          <div class="demo-panel__flow-step">💬 Вопрос студента</div>
+          <div class="demo-panel__flow-arrow">↓</div>
+          <div class="demo-panel__flow-step demo-panel__flow-step--tool">⚡ <code>searchTopic</code> · mcp-study</div>
+          <div class="demo-panel__flow-arrow">↓</div>
+          <div class="demo-panel__flow-step demo-panel__flow-step--db">🗄 SQLite · study-reference.db</div>
+          <div class="demo-panel__flow-arrow">↓</div>
+          <div class="demo-panel__flow-step demo-panel__flow-step--answer">✅ Ответ + блок MCP Tool Call</div>
+        </div>
+        <button type="button" id="demo-run-btn" class="demo-panel__run">▶ Запустить демо</button>
+        <p class="demo-panel__hint">Смотрите логи backend и зелёный блок над ответом агента</p>
+      </div>
     </div>
   `;
+  initDemoPanel();
+}
+
+function initDemoPanel() {
+  const runBtn = document.getElementById('demo-run-btn');
+  if (!runBtn) return;
+  runBtn.addEventListener('click', () => runDemoPrompt(DEMO_PROMPT));
+}
+
+async function runDemoPrompt(prompt) {
+  if (!prompt?.trim()) return;
+  promptInput.value = prompt;
+  resizeInput();
+  await sendMessage(prompt);
+  promptInput.value = '';
+  resizeInput();
+  promptInput.focus();
+}
+
+function shortToolName(name) {
+  if (!name) return '';
+  if (name.includes('searchTopic')) return 'searchTopic';
+  if (name.includes('getExamOutline')) return 'getExamOutline';
+  return name.replace(/^.*_/, '');
+}
+
+function formatMcpResultPreview(preview) {
+  if (!preview) return '';
+  const raw = preview.endsWith('...') ? preview.slice(0, -3) : preview;
+  try {
+    const data = JSON.parse(raw);
+    if (Array.isArray(data.matches) && data.matches.length) {
+      return data.matches
+        .slice(0, 3)
+        .map((m) => `📌 ${m.topic}\n   ${(m.summary || '').slice(0, 120)}`)
+        .join('\n\n');
+    }
+    if (Array.isArray(data.topics) && data.topics.length) {
+      return data.topics.map((t, i) => `${i + 1}. ${t.topic}`).join('\n');
+    }
+  } catch {
+    // not JSON
+  }
+  return preview.length > 220 ? `${preview.slice(0, 220)}…` : preview;
 }
 
 function clearEmptyState() {
@@ -754,12 +833,46 @@ function createMessageElement(role) {
   bubbleEl.append(labelEl, textEl);
   messageEl.append(avatarEl, bubbleEl);
   messagesEl.appendChild(messageEl);
-  return textEl;
+  return { textEl, bubbleEl };
 }
 
-function appendMessage(role, text) {
-  const textEl = createMessageElement(role);
+function appendMcpToolCalls(bubbleEl, toolCalls, insertBefore = null) {
+  if (!bubbleEl || !Array.isArray(toolCalls) || toolCalls.length === 0) return;
+  const block = document.createElement('div');
+  block.className = 'message__mcp-calls';
+  block.innerHTML = `<div class="message__mcp-calls-title">MCP Tool Call — данные из справочника</div>${toolCalls
+    .map((call) => {
+      const name = shortToolName(call.toolName || '');
+      const result = formatMcpResultPreview(call.resultPreview || '');
+      return `<div class="message__mcp-call">
+        <div class="message__mcp-call-head">
+          <span class="message__mcp-call-name">${escapeHtml(name)}</span>
+          <span class="message__mcp-call-server">${escapeHtml(call.serverName || 'mcp-study')}</span>
+          ${call.durationMs != null ? `<span class="message__mcp-call-ms">${call.durationMs} ms</span>` : ''}
+        </div>
+        ${result ? `<div class="message__mcp-call-result">${escapeHtml(result)}</div>` : ''}
+        <details class="message__mcp-call-details"><summary>JSON args / raw</summary>
+          <pre>${escapeHtml(`args: ${call.arguments || ''}\n\nraw: ${call.resultPreview || ''}`)}</pre>
+        </details>
+      </div>`;
+    })
+    .join('')}`;
+  if (insertBefore) {
+    bubbleEl.insertBefore(block, insertBefore);
+  } else {
+    bubbleEl.appendChild(block);
+  }
+}
+
+function appendMessage(role, text, mcpToolCalls) {
+  const { textEl, bubbleEl } = createMessageElement(role);
+  if (role === 'assistant' && mcpToolCalls?.length) {
+    appendMcpToolCalls(bubbleEl, mcpToolCalls, textEl);
+  }
   textEl.textContent = text;
+  if (role !== 'assistant' || !mcpToolCalls?.length) {
+    appendMcpToolCalls(bubbleEl, mcpToolCalls);
+  }
   scrollToBottom();
 }
 
@@ -772,9 +885,16 @@ async function revealText(textEl, text) {
   }
 }
 
-async function appendMessageGradually(role, text) {
-  const textEl = createMessageElement(role);
+async function appendMessageGradually(role, text, mcpToolCalls) {
+  const { textEl, bubbleEl } = createMessageElement(role);
+  if (role === 'assistant' && mcpToolCalls?.length) {
+    appendMcpToolCalls(bubbleEl, mcpToolCalls, textEl);
+    scrollToBottom();
+  }
   await revealText(textEl, text);
+  if (role !== 'assistant' || !mcpToolCalls?.length) {
+    appendMcpToolCalls(bubbleEl, mcpToolCalls);
+  }
 }
 
 function formatTokens(value) {
@@ -939,9 +1059,9 @@ async function sendMessage(prompt, options = {}) {
 
     setLoading(false);
     if (options.skipTyping) {
-      appendMessage('assistant', data.response || 'Пустой ответ.');
+      appendMessage('assistant', data.response || 'Пустой ответ.', data.mcpToolCalls);
     } else {
-      await appendMessageGradually('assistant', data.response || 'Пустой ответ.');
+      await appendMessageGradually('assistant', data.response || 'Пустой ответ.', data.mcpToolCalls);
     }
     return { ok: true, data };
   } catch (error) {
@@ -995,6 +1115,7 @@ promptInput.addEventListener('keydown', (event) => {
 });
 
 initMemoryTabs();
+initDemoPanel();
 resizeInput();
 
 if (getAuthToken()) {
