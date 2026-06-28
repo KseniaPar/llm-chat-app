@@ -14,7 +14,7 @@ public final class TaskStateTransitions {
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern READY_FOR_VALIDATION = Pattern.compile(
             "(?:^|[\\s,.!?;:—–-])"
-                    + "(?:провер(?:ь|ить|ка)?\\s*(?:меня|мои\\s+знания)?|самопровер(?:ка|ить|им)?|"
+                    + "(?:провер(?:ь|и)\\s+(?:меня|мои\\s+знания|знания)|самопровер(?:ка|ить|им)?|"
                     + "задай\\s+(?:\\d+\\s+)?(?:вопрос|тест)|протестируй|тест\\s+по|"
                     + "вопросы\\s+для\\s+проверки|тест\\s+[A-Da-dА-Га-г](?:\\s+[A-Da-dА-Га-г]){2,3})",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);

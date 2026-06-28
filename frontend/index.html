@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 17 — First MCP Tool</title>
+  <title>День 18 — Scheduler MCP</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -13,7 +13,7 @@
   <div id="auth-overlay" class="auth-overlay">
     <section class="auth-card">
       <h2 class="auth-card__title">Вход в платформу</h2>
-      <p class="auth-card__desc">День 17 — первый MCP-инструмент в агенте</p>
+      <p class="auth-card__desc">День 18 — планировщик и фоновые задачи через MCP</p>
       <div class="auth-card__tabs">
         <button id="auth-tab-login" class="auth-card__tab auth-card__tab--active" type="button">Вход</button>
         <button id="auth-tab-register" class="auth-card__tab" type="button">Регистрация</button>
@@ -41,7 +41,7 @@
             <div class="chat-header__avatar" aria-hidden="true">AI</div>
             <div class="chat-header__info">
               <h1>Агент</h1>
-              <p>День 17 — MCP Tool Calling + справочник + память</p>
+              <p>День 18 — Scheduler MCP + напоминания + сводка 24/7</p>
             </div>
             <span id="auth-user-label" class="chat-header__user"></span>
             <span id="loading" class="chat-header__status hidden" aria-live="polite">
@@ -57,23 +57,24 @@
           <div class="messages-empty" id="demo-panel">
             <div class="demo-panel">
               <div class="demo-panel__header">
-                <span class="demo-panel__badge">Day 17</span>
-                <h2 class="demo-panel__title">MCP Tool Calling — демо</h2>
+                <span class="demo-panel__badge">Day 18</span>
+                <h2 class="demo-panel__title">Scheduler MCP — демо</h2>
                 <p class="demo-panel__desc">
-                  Один клик — агент вызовет <code>searchTopic</code>, прочитает справочник и ответит фактами.
+                  Сценарий: напоминание о перерыве через 30 сек — <code>scheduleReminder</code> → SQLite →
+                  <code>SchedulerRunner</code>.
                 </p>
               </div>
               <div class="demo-panel__flow" aria-hidden="true">
-                <div class="demo-panel__flow-step">💬 Вопрос студента</div>
+                <div class="demo-panel__flow-step">💬 «Напомни о перерыве…»</div>
                 <div class="demo-panel__flow-arrow">↓</div>
-                <div class="demo-panel__flow-step demo-panel__flow-step--tool">⚡ <code>searchTopic</code> · mcp-study</div>
+                <div class="demo-panel__flow-step demo-panel__flow-step--tool">⚡ <code>scheduleReminder</code></div>
                 <div class="demo-panel__flow-arrow">↓</div>
-                <div class="demo-panel__flow-step demo-panel__flow-step--db">🗄 SQLite · study-reference.db</div>
+                <div class="demo-panel__flow-step demo-panel__flow-step--db">🗄 scheduler.db</div>
                 <div class="demo-panel__flow-arrow">↓</div>
-                <div class="demo-panel__flow-step demo-panel__flow-step--answer">✅ Ответ + блок MCP Tool Call</div>
+                <div class="demo-panel__flow-step demo-panel__flow-step--answer">⏱ SchedulerRunner · 30 сек</div>
               </div>
               <button type="button" id="demo-run-btn" class="demo-panel__run">▶ Запустить демо</button>
-              <p class="demo-panel__hint">Смотрите логи backend и зелёный блок над ответом агента</p>
+              <p class="demo-panel__hint">MCP-блок в чате · панель Scheduled Tasks справа · ~30 сек</p>
             </div>
           </div>
         </div>
@@ -195,6 +196,17 @@
           </h3>
           <ul id="invariants-list" class="invariants-panel__list"></ul>
         </div>
+        <div id="scheduler-panel" class="scheduler-panel">
+          <h3 class="scheduler-panel__title">
+            Scheduled Tasks
+            <span id="scheduler-badge" class="scheduler-panel__badge">—</span>
+          </h3>
+          <p class="scheduler-panel__hint">SchedulerRunner · опрос каждые 15 с</p>
+          <ul id="scheduler-tasks-list" class="scheduler-panel__list"></ul>
+          <p id="scheduler-tasks-empty" class="scheduler-panel__empty">Нет активных задач</p>
+          <h4 class="scheduler-panel__subtitle">Последняя сводка</h4>
+          <div id="scheduler-summary" class="scheduler-panel__summary">Загрузка…</div>
+        </div>
         <div id="mcp-panel" class="mcp-panel">
           <h3 class="mcp-panel__title">
             MCP Tools
@@ -202,13 +214,22 @@
           </h3>
           <p id="mcp-status-message" class="mcp-panel__message">Загрузка статуса MCP…</p>
           <p id="mcp-sandbox-path" class="mcp-panel__sandbox hidden"></p>
+          <div id="mcp-scheduler-highlight" class="mcp-panel__study-highlight hidden">
+            <span class="mcp-panel__study-label">Day 18 — агент вызывает</span>
+            <code class="mcp-panel__study-tool">scheduleReminder</code>
+            <code class="mcp-panel__study-tool">getSummary</code>
+          </div>
           <div id="mcp-study-highlight" class="mcp-panel__study-highlight hidden">
-            <span class="mcp-panel__study-label">Day 17 — агент вызывает</span>
+            <span class="mcp-panel__study-label">Day 17 — справочник</span>
             <code class="mcp-panel__study-tool">searchTopic</code>
             <code class="mcp-panel__study-tool">getExamOutline</code>
           </div>
           <div class="mcp-panel__actions">
             <button id="mcp-refresh-btn" class="mcp-panel__btn" type="button">Обновить</button>
+          </div>
+          <div id="mcp-scheduler-tools-wrap" class="mcp-panel__group hidden">
+            <h4 class="mcp-panel__group-title">⏱ mcp-scheduler</h4>
+            <ul id="mcp-scheduler-tools-list" class="mcp-panel__list"></ul>
           </div>
           <div id="mcp-study-tools-wrap" class="mcp-panel__group hidden">
             <h4 class="mcp-panel__group-title">📚 mcp-study</h4>
