@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 16 — MCP Connection</title>
+  <title>День 17 — First MCP Tool</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -13,7 +13,7 @@
   <div id="auth-overlay" class="auth-overlay">
     <section class="auth-card">
       <h2 class="auth-card__title">Вход в платформу</h2>
-      <p class="auth-card__desc">День 16 — подключение к MCP и список инструментов</p>
+      <p class="auth-card__desc">День 17 — первый MCP-инструмент в агенте</p>
       <div class="auth-card__tabs">
         <button id="auth-tab-login" class="auth-card__tab auth-card__tab--active" type="button">Вход</button>
         <button id="auth-tab-register" class="auth-card__tab" type="button">Регистрация</button>
@@ -41,7 +41,7 @@
             <div class="chat-header__avatar" aria-hidden="true">AI</div>
             <div class="chat-header__info">
               <h1>Агент</h1>
-              <p>День 16 — MCP Connection + инварианты + задача + память</p>
+              <p>День 17 — MCP Tool Calling + справочник + память</p>
             </div>
             <span id="auth-user-label" class="chat-header__user"></span>
             <span id="loading" class="chat-header__status hidden" aria-live="polite">
@@ -54,9 +54,27 @@
         </header>
 
         <div id="messages" class="messages" aria-live="polite">
-          <div class="messages-empty">
-            <div class="messages-empty__icon" aria-hidden="true">💬</div>
-            <p>Начните диалог — агент запомнит контекст в трёх слоях памяти</p>
+          <div class="messages-empty" id="demo-panel">
+            <div class="demo-panel">
+              <div class="demo-panel__header">
+                <span class="demo-panel__badge">Day 17</span>
+                <h2 class="demo-panel__title">MCP Tool Calling — демо</h2>
+                <p class="demo-panel__desc">
+                  Один клик — агент вызовет <code>searchTopic</code>, прочитает справочник и ответит фактами.
+                </p>
+              </div>
+              <div class="demo-panel__flow" aria-hidden="true">
+                <div class="demo-panel__flow-step">💬 Вопрос студента</div>
+                <div class="demo-panel__flow-arrow">↓</div>
+                <div class="demo-panel__flow-step demo-panel__flow-step--tool">⚡ <code>searchTopic</code> · mcp-study</div>
+                <div class="demo-panel__flow-arrow">↓</div>
+                <div class="demo-panel__flow-step demo-panel__flow-step--db">🗄 SQLite · study-reference.db</div>
+                <div class="demo-panel__flow-arrow">↓</div>
+                <div class="demo-panel__flow-step demo-panel__flow-step--answer">✅ Ответ + блок MCP Tool Call</div>
+              </div>
+              <button type="button" id="demo-run-btn" class="demo-panel__run">▶ Запустить демо</button>
+              <p class="demo-panel__hint">Смотрите логи backend и зелёный блок над ответом агента</p>
+            </div>
           </div>
         </div>
 
@@ -184,10 +202,23 @@
           </h3>
           <p id="mcp-status-message" class="mcp-panel__message">Загрузка статуса MCP…</p>
           <p id="mcp-sandbox-path" class="mcp-panel__sandbox hidden"></p>
+          <div id="mcp-study-highlight" class="mcp-panel__study-highlight hidden">
+            <span class="mcp-panel__study-label">Day 17 — агент вызывает</span>
+            <code class="mcp-panel__study-tool">searchTopic</code>
+            <code class="mcp-panel__study-tool">getExamOutline</code>
+          </div>
           <div class="mcp-panel__actions">
             <button id="mcp-refresh-btn" class="mcp-panel__btn" type="button">Обновить</button>
           </div>
-          <ul id="mcp-tools-list" class="mcp-panel__list"></ul>
+          <div id="mcp-study-tools-wrap" class="mcp-panel__group hidden">
+            <h4 class="mcp-panel__group-title">📚 mcp-study</h4>
+            <ul id="mcp-study-tools-list" class="mcp-panel__list"></ul>
+          </div>
+          <details id="mcp-fs-tools-wrap" class="mcp-panel__group mcp-panel__group--collapsed hidden">
+            <summary class="mcp-panel__group-title">📁 filesystem <span id="mcp-fs-count" class="mcp-panel__group-count"></span></summary>
+            <ul id="mcp-fs-tools-list" class="mcp-panel__list"></ul>
+          </details>
+          <ul id="mcp-tools-list" class="mcp-panel__list hidden"></ul>
           <p id="mcp-tools-empty" class="mcp-panel__empty hidden">Инструменты не загружены</p>
         </div>
         <div id="memory-panel" class="memory-panel">

@@ -32,6 +32,7 @@ public class McpConnectionService {
 
     private volatile McpToolsResponse cachedSnapshot;
     private volatile String lastError;
+    private volatile boolean clientsInitialized;
 
     public McpConnectionService(
             ObjectProvider<List<McpSyncClient>> mcpClientsProvider,
@@ -60,22 +61,22 @@ public class McpConnectionService {
     }
 
     public McpToolsResponse refreshToolsSnapshot() {
+        log.info("MCP reconnect requested — re-initializing server connections");
         cachedSnapshot = null;
+        clientsInitialized = false;
         return getToolsSnapshot(true);
     }
 
     public void logStartupSummary() {
+        initializeClientsQuietly();
         McpToolsResponse snapshot = refreshToolsSnapshot();
         if (snapshot.connected()) {
             log.info(
-                    "MCP connected: {} server(s), {} tool(s). Sandbox: {}",
+                    "MCP ready: {} server(s), {} tool(s), sandbox={}",
                     snapshot.servers().size(),
                     snapshot.toolCount(),
                     snapshot.sandboxPath());
-            snapshot.tools().stream()
-                    .map(McpToolDto::name)
-                    .limit(12)
-                    .forEach(toolName -> log.info("  MCP tool: {}", toolName));
+            snapshot.servers().forEach(server -> log.info("  MCP server online: {}", server));
         } else {
             log.warn("MCP is not connected: {}", snapshot.message());
         }
@@ -86,6 +87,7 @@ public class McpConnectionService {
             return cachedSnapshot;
         }
 
+        initializeClientsQuietly();
         Instant checkedAt = Instant.now();
         if (!mcpEnabled) {
             return cache(new McpToolsResponse(
@@ -170,5 +172,62 @@ public class McpConnectionService {
             return objectMapper.createObjectNode();
         }
         return objectMapper.valueToTree(schema);
+    }
+
+    private void initializeClientsQuietly() {
+        if (clientsInitialized) {
+            return;
+        }
+        List<McpSyncClient> clients = mcpClientsProvider.getIfAvailable();
+        if (clients == null) {
+            return;
+        }
+        synchronized (this) {
+            if (clientsInitialized) {
+                return;
+            }
+            for (int index = 0; index < clients.size(); index++) {
+                McpSyncClient client = clients.get(index);
+                try {
+                    client.initialize();
+                    logServerConnected(client, index);
+                } catch (Exception exception) {
+                    log.warn("MCP client #{} initialize failed: {}", index + 1, exception.getMessage());
+                }
+            }
+            clientsInitialized = true;
+        }
+    }
+
+    private void logServerConnected(McpSyncClient client, int index) {
+        String serverName = resolveServerName(client, index);
+        String version = "?";
+        try {
+            McpSchema.Implementation info = client.getServerInfo();
+            if (info != null && info.version() != null) {
+                version = info.version();
+            }
+        } catch (Exception ignored) {
+            // keep default version
+        }
+        log.info("MCP server connected: name={}, version={}", serverName, version);
+        try {
+            McpSchema.ListToolsResult toolsResult = client.listTools();
+            int toolCount = toolsResult != null && toolsResult.tools() != null
+                    ? toolsResult.tools().size()
+                    : 0;
+            log.info("MCP server {} registered {} tool(s)", serverName, toolCount);
+            if (toolsResult != null && toolsResult.tools() != null) {
+                int limit = "mcp-study".equalsIgnoreCase(serverName) ? 10 : 4;
+                toolsResult.tools().stream()
+                        .limit(limit)
+                        .forEach(tool -> log.info("  [{}] {}", serverName, tool.name()));
+                if (toolCount > limit) {
+                    log.info("  [{}] ... and {} more", serverName, toolCount - limit);
+                }
+            }
+        } catch (Exception exception) {
+            log.warn("MCP server {} tool list failed: {}", serverName, exception.getMessage());
+        }
     }
 }

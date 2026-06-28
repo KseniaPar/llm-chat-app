@@ -21,6 +21,7 @@
     <modules>
         <module>backend</module>
         <module>frontend</module>
+        <module>mcp-servers</module>
     </modules>
 
     <properties>

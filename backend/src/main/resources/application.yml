@@ -7,12 +7,21 @@ spring:
     url: jdbc:sqlite:${app.database.path}
     driver-class-name: org.sqlite.JDBC
   ai:
+    openai:
+      api-key: ${app.openrouter.api-key}
+      base-url: ${app.openrouter.base-url}
+      chat:
+        options:
+          model: ${app.openrouter.model}
+          temperature: ${app.agent.temperature}
+          max-tokens: ${app.agent.max-tokens}
     mcp:
       client:
         enabled: ${app.mcp.enabled:true}
         name: llm-chat-mcp-client
         type: SYNC
-        request-timeout: 60s
+        request-timeout: 90s
+        initialized: false
         toolcallback:
           enabled: false
         stdio:
@@ -40,6 +49,7 @@ app:
       Отвечай кратко и по делу, с опорой на контекст задачи и память о студенте.
       Блок TASK важнее общих правил краткости.
       Блок INVARIANTS важнее TASK и PROFILE — при конфликте следуй инвариантам.
+      Если нужны факты из учебного справочника — используй MCP-инструменты searchTopic и getExamOutline.
       На этапе «Подготовка плана»: сначала уточняющие вопросы, затем (шаг «Согласование плана») — краткий план и запрос подтверждения.
       Если достаточно одного-двух предложений — ограничься ими (кроме списка вопросов на уточнении).
     temperature: 0.5
