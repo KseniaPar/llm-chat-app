@@ -54,6 +54,13 @@ const transitionsList = document.getElementById('transitions-list');
 const transitionsEmpty = document.getElementById('transitions-empty');
 const invariantsList = document.getElementById('invariants-list');
 const invariantsCountBadge = document.getElementById('invariants-count-badge');
+const mcpPanel = document.getElementById('mcp-panel');
+const mcpStatusBadge = document.getElementById('mcp-status-badge');
+const mcpStatusMessage = document.getElementById('mcp-status-message');
+const mcpSandboxPath = document.getElementById('mcp-sandbox-path');
+const mcpRefreshBtn = document.getElementById('mcp-refresh-btn');
+const mcpToolsList = document.getElementById('mcp-tools-list');
+const mcpToolsEmpty = document.getElementById('mcp-tools-empty');
 
 const CHAR_DELAY_MS = 18;
 const SESSION_STORAGE_KEY = 'llm-chat-session-id';
@@ -164,7 +171,14 @@ async function handleAuthSubmit(event) {
     localStorage.setItem(JWT_STORAGE_KEY, authToken);
     localStorage.setItem(AUTH_USER_STORAGE_KEY, authUsernameValue);
     hideAuthOverlay();
-    await Promise.all([restoreSessionFromStorage(), loadProfile(), loadTaskState(), loadTransitions(), loadInvariants()]);
+    await Promise.all([
+      restoreSessionFromStorage(),
+      loadProfile(),
+      loadTaskState(),
+      loadTransitions(),
+      loadInvariants(),
+      loadMcpTools(),
+    ]);
     promptInput?.focus();
   } catch (error) {
     if (authError) {
@@ -392,6 +406,81 @@ async function loadInvariants() {
     renderInvariantsPanel(await response.json());
   } catch {
     // optional
+  }
+}
+
+function renderMcpPanel(data) {
+  if (!mcpPanel) return;
+  mcpPanel.classList.remove('hidden');
+  statsPanel?.classList.remove('hidden');
+
+  const connected = Boolean(data?.connected);
+  if (mcpStatusBadge) {
+    mcpStatusBadge.textContent = connected ? 'Connected' : 'Offline';
+    mcpStatusBadge.classList.toggle('mcp-panel__badge--online', connected);
+    mcpStatusBadge.classList.toggle('mcp-panel__badge--offline', !connected);
+  }
+  if (mcpStatusMessage) {
+    const toolCount = data?.toolCount ?? 0;
+    const servers = Array.isArray(data?.servers) ? data.servers.join(', ') : '';
+    mcpStatusMessage.textContent = connected
+      ? `${toolCount} инструмент(ов) · сервер(ы): ${servers || 'filesystem'}`
+      : data?.message || 'MCP недоступен. Установите Node.js и npx.';
+  }
+  if (mcpSandboxPath) {
+    if (data?.sandboxPath) {
+      mcpSandboxPath.textContent = `Sandbox: ${data.sandboxPath}`;
+      mcpSandboxPath.classList.remove('hidden');
+    } else {
+      mcpSandboxPath.classList.add('hidden');
+    }
+  }
+
+  const tools = Array.isArray(data?.tools) ? data.tools : [];
+  if (mcpToolsList) {
+    mcpToolsList.innerHTML = tools.length
+      ? tools
+          .map(
+            (tool) => `<li class="mcp-panel__item">
+          <div class="mcp-panel__head">
+            <span class="mcp-panel__name">${escapeHtml(tool.name || '')}</span>
+            <span class="mcp-panel__server">${escapeHtml(tool.serverName || '')}</span>
+          </div>
+          <p class="mcp-panel__desc">${escapeHtml(tool.description || '')}</p>
+          ${
+            tool.inputSchema
+              ? `<details class="mcp-panel__schema"><summary>inputSchema</summary><pre>${escapeHtml(JSON.stringify(tool.inputSchema, null, 2))}</pre></details>`
+              : ''
+          }
+        </li>`,
+          )
+          .join('')
+      : '';
+  }
+  if (mcpToolsEmpty) {
+    mcpToolsEmpty.classList.toggle('hidden', tools.length > 0);
+    if (!tools.length) {
+      mcpToolsEmpty.textContent = connected
+        ? 'Сервер подключён, но список инструментов пуст.'
+        : 'Установите Node.js 18+ и перезапустите backend.';
+    }
+  }
+}
+
+async function loadMcpTools(refresh = false) {
+  if (!getAuthToken()) return;
+  try {
+    const response = await apiFetch(refresh ? '/api/mcp/reconnect' : '/api/mcp/tools', refresh ? { method: 'POST' } : {});
+    if (!response.ok) return;
+    renderMcpPanel(await response.json());
+  } catch {
+    renderMcpPanel({
+      connected: false,
+      toolCount: 0,
+      servers: [],
+      tools: [],
+      message: 'Не удалось загрузить MCP. Проверьте backend и Node.js.',
+    });
   }
 }
 
@@ -896,6 +985,7 @@ authTabRegister?.addEventListener('click', () => setAuthMode('register'));
 profileForm?.addEventListener('submit', saveProfile);
 taskPauseBtn?.addEventListener('click', pauseTask);
 taskResumeBtn?.addEventListener('click', resumeTask);
+mcpRefreshBtn?.addEventListener('click', () => loadMcpTools(true));
 promptInput.addEventListener('input', resizeInput);
 promptInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
@@ -909,9 +999,14 @@ resizeInput();
 
 if (getAuthToken()) {
   hideAuthOverlay();
-  Promise.all([restoreSessionFromStorage(), loadProfile(), loadTaskState(), loadTransitions(), loadInvariants()]).finally(() =>
-    promptInput.focus(),
-  );
+  Promise.all([
+    restoreSessionFromStorage(),
+    loadProfile(),
+    loadTaskState(),
+    loadTransitions(),
+    loadInvariants(),
+    loadMcpTools(),
+  ]).finally(() => promptInput.focus());
 } else {
   showAuthOverlay();
 }
