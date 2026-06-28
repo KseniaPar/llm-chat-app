@@ -13,6 +13,9 @@
         <appender-ref ref="CONSOLE"/>
     </root>
 
+    <logger name="com.example.llmchat.mcp" level="INFO"/>
+    <logger name="com.example.llmchat.config.AgentChatClientConfig" level="INFO"/>
+    <logger name="io.modelcontextprotocol.client" level="INFO"/>
     <logger name="com.example.llmchat.controller.SimulatorController" level="WARN"/>
     <logger name="com.example.llmchat.agent.SimulatorService" level="WARN"/>
     <logger name="com.example.llmchat.agent.UserSimulator" level="WARN"/>

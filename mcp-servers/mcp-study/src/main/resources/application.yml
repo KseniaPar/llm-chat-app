@@ -1,0 +1,21 @@
+spring:
+  main:
+    web-application-type: none
+    banner-mode: off
+    log-startup-info: false
+  datasource:
+    url: jdbc:sqlite:${study.db.path:data/study-reference.db}
+    driver-class-name: org.sqlite.JDBC
+  ai:
+    mcp:
+      server:
+        name: mcp-study
+        stdio: true
+
+study:
+  db:
+    path: ${STUDY_DB_PATH:data/study-reference.db}
+
+logging:
+  level:
+    root: WARN

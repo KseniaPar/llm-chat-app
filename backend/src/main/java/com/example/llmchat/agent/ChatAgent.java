@@ -4,6 +4,7 @@ import com.example.llmchat.dto.AgentChatMessage;
 import com.example.llmchat.dto.AgentRequest;
 import com.example.llmchat.dto.AgentResponse;
 import com.example.llmchat.dto.InvariantsSnapshot;
+import com.example.llmchat.dto.McpToolCallLogDto;
 import com.example.llmchat.dto.MemoryContextSnapshot;
 import com.example.llmchat.dto.TaskStateSnapshot;
 import com.example.llmchat.dto.TokenStats;
@@ -36,6 +37,7 @@ public class ChatAgent {
     private static final ContextStrategy INTERNAL_STRATEGY = ContextStrategy.SLIDING_WINDOW;
 
     private final OpenRouterHttpClient openRouterHttpClient;
+    private final AgentChatCompletionService agentChatCompletionService;
     private final ConversationStore conversationStore;
     private final HttpExchangeLogger httpExchangeLogger;
     private final TokenCounter tokenCounter;
@@ -50,12 +52,12 @@ public class ChatAgent {
     private final InvariantGuard invariantGuard;
     private final InvariantsService invariantsService;
     private final PersonalizationService personalizationService;
-    private final String model;
     private final double temperature;
     private final int maxTokens;
 
     public ChatAgent(
             OpenRouterHttpClient openRouterHttpClient,
+            AgentChatCompletionService agentChatCompletionService,
             ConversationStore conversationStore,
             HttpExchangeLogger httpExchangeLogger,
             TokenCounter tokenCounter,
@@ -70,10 +72,10 @@ public class ChatAgent {
             InvariantGuard invariantGuard,
             InvariantsService invariantsService,
             PersonalizationService personalizationService,
-            @Value("${app.openrouter.model}") String model,
             @Value("${app.agent.temperature}") double temperature,
             @Value("${app.agent.max-tokens}") int maxTokens) {
         this.openRouterHttpClient = openRouterHttpClient;
+        this.agentChatCompletionService = agentChatCompletionService;
         this.conversationStore = conversationStore;
         this.httpExchangeLogger = httpExchangeLogger;
         this.tokenCounter = tokenCounter;
@@ -88,7 +90,6 @@ public class ChatAgent {
         this.invariantGuard = invariantGuard;
         this.invariantsService = invariantsService;
         this.personalizationService = personalizationService;
-        this.model = model;
         this.temperature = temperature;
         this.maxTokens = maxTokens;
     }
@@ -222,8 +223,17 @@ public class ChatAgent {
             logs.add("Оценка промпта превышает окно модели — запрос всё равно уходит в OpenRouter.");
         }
 
-        CompletionResult completion = openRouterHttpClient.complete(model, temperature, maxTokens, messages);
+        AgentChatCompletionService.AgentChatResult completion =
+                agentChatCompletionService.complete(messages, temperature, maxTokens);
         String answer = completion.content();
+        List<McpToolCallLogDto> mcpToolCalls = completion.mcpToolCalls();
+
+        if (!mcpToolCalls.isEmpty()) {
+            logs.add("MCP → выполнено tool calls: " + mcpToolCalls.size());
+            for (McpToolCallLogDto call : mcpToolCalls) {
+                logs.add("MCP tool: " + call.toolName() + " (" + call.durationMs() + " ms)");
+            }
+        }
 
         int promptTokensActual = completion.promptTokens() > 0
                 ? completion.promptTokens()
@@ -341,7 +351,8 @@ public class ChatAgent {
                 responseTaskSnapshot,
                 List.copyOf(taskStateLogs),
                 assembled.invariantsSnapshot(),
-                List.copyOf(assembled.invariantLogs()));
+                List.copyOf(assembled.invariantLogs()),
+                List.copyOf(mcpToolCalls));
     }
 
     private void appendTransitionLog(List<String> logs, TransitionResult result) {
@@ -439,7 +450,8 @@ public class ChatAgent {
                 taskSnapshot,
                 List.copyOf(taskStateLogs),
                 invariantsSnapshot,
-                List.copyOf(invariantLogs));
+                List.copyOf(invariantLogs),
+                List.of());
     }
 
     public void resetSession(String sessionId, String userId) {
