@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 15 — Контролируемые переходы</title>
+  <title>День 16 — MCP Connection</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -13,7 +13,7 @@
   <div id="auth-overlay" class="auth-overlay">
     <section class="auth-card">
       <h2 class="auth-card__title">Вход в платформу</h2>
-      <p class="auth-card__desc">День 15 — контролируемые переходы состояний задачи</p>
+      <p class="auth-card__desc">День 16 — подключение к MCP и список инструментов</p>
       <div class="auth-card__tabs">
         <button id="auth-tab-login" class="auth-card__tab auth-card__tab--active" type="button">Вход</button>
         <button id="auth-tab-register" class="auth-card__tab" type="button">Регистрация</button>
@@ -41,7 +41,7 @@
             <div class="chat-header__avatar" aria-hidden="true">AI</div>
             <div class="chat-header__info">
               <h1>Агент</h1>
-              <p>День 15 — контролируемые переходы + инварианты + задача + память</p>
+              <p>День 16 — MCP Connection + инварианты + задача + память</p>
             </div>
             <span id="auth-user-label" class="chat-header__user"></span>
             <span id="loading" class="chat-header__status hidden" aria-live="polite">
@@ -176,6 +176,19 @@
             <span id="invariants-count-badge" class="invariants-panel__badge">14</span>
           </h3>
           <ul id="invariants-list" class="invariants-panel__list"></ul>
+        </div>
+        <div id="mcp-panel" class="mcp-panel">
+          <h3 class="mcp-panel__title">
+            MCP Tools
+            <span id="mcp-status-badge" class="mcp-panel__badge mcp-panel__badge--offline">—</span>
+          </h3>
+          <p id="mcp-status-message" class="mcp-panel__message">Загрузка статуса MCP…</p>
+          <p id="mcp-sandbox-path" class="mcp-panel__sandbox hidden"></p>
+          <div class="mcp-panel__actions">
+            <button id="mcp-refresh-btn" class="mcp-panel__btn" type="button">Обновить</button>
+          </div>
+          <ul id="mcp-tools-list" class="mcp-panel__list"></ul>
+          <p id="mcp-tools-empty" class="mcp-panel__empty hidden">Инструменты не загружены</p>
         </div>
         <div id="memory-panel" class="memory-panel">
           <h3 class="memory-panel__title">Память агента</h3>

@@ -6,8 +6,23 @@ spring:
   datasource:
     url: jdbc:sqlite:${app.database.path}
     driver-class-name: org.sqlite.JDBC
+  ai:
+    mcp:
+      client:
+        enabled: ${app.mcp.enabled:true}
+        name: llm-chat-mcp-client
+        type: SYNC
+        request-timeout: 60s
+        toolcallback:
+          enabled: false
+        stdio:
+          servers-configuration: file:${app.mcp.servers-config}
 
 app:
+  mcp:
+    enabled: true
+    sandbox:
+      relative-path: data/mcp-sandbox
   database:
     path: data/llm-chat.db
   auth:
