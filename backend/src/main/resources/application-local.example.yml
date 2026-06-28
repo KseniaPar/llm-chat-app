@@ -1,3 +1,6 @@
 app:
   openrouter:
     api-key: your-openrouter-api-key-here
+  mcp:
+    enabled: true
+    # Set to false if Node.js / npx is not installed (backend will start without MCP)
