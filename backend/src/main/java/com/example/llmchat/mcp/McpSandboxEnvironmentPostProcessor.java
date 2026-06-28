@@ -19,7 +19,7 @@ import java.util.stream.Stream;
 
 /**
  * Prepares MCP sandbox directory and generates Claude Desktop-style stdio config
- * for filesystem (Day 16), mcp-study (Day 17), and mcp-scheduler (Day 18) servers.
+ * for filesystem (Day 16), mcp-study (Day 17), mcp-scheduler (Day 18), and mcp-pipeline (Day 19).
  */
 public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProcessor {
 
@@ -28,6 +28,7 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
     private static final String SERVERS_CONFIG_KEY = "app.mcp.servers-config";
     private static final String STUDY_DB_ABSOLUTE_KEY = "app.mcp.study-db.absolute";
     private static final String SCHEDULER_DB_ABSOLUTE_KEY = "app.mcp.scheduler-db.absolute";
+    private static final String PIPELINE_OUTPUT_ABSOLUTE_KEY = "app.mcp.pipeline-output.absolute";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -37,6 +38,7 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
         Path sandbox = Paths.get(relativePath).toAbsolutePath().normalize();
         Path studyDb = Paths.get("data/study-reference.db").toAbsolutePath().normalize();
         Path schedulerDb = Paths.get("data/scheduler.db").toAbsolutePath().normalize();
+        Path pipelineOutput = Paths.get("data/pipeline").toAbsolutePath().normalize();
         try {
             Files.createDirectories(sandbox);
             Path readme = sandbox.resolve("readme.txt");
@@ -55,6 +57,7 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
             if (schedulerDb.getParent() != null) {
                 Files.createDirectories(schedulerDb.getParent());
             }
+            Files.createDirectories(pipelineOutput);
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to prepare MCP directories: " + sandbox, exception);
         }
@@ -63,8 +66,10 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
         ModuleLaunch studyLaunch = resolveModuleLaunch("mcp-study", "com.example.mcp.study.StudyMcpApplication");
         ModuleLaunch schedulerLaunch =
                 resolveModuleLaunch("mcp-scheduler", "com.example.mcp.scheduler.SchedulerMcpApplication");
+        ModuleLaunch pipelineLaunch =
+                resolveModuleLaunch("mcp-pipeline", "com.example.mcp.pipeline.PipelineMcpApplication");
         try {
-            writeServersConfig(configFile, sandbox, studyDb, schedulerDb, studyLaunch, schedulerLaunch);
+            writeServersConfig(configFile, sandbox, studyDb, schedulerDb, pipelineOutput, studyLaunch, schedulerLaunch, pipelineLaunch);
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to write MCP servers config: " + configFile, exception);
         }
@@ -74,6 +79,7 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
         properties.put(SERVERS_CONFIG_KEY, configFile.toAbsolutePath().normalize().toString().replace('\\', '/'));
         properties.put(STUDY_DB_ABSOLUTE_KEY, studyDb.toString().replace('\\', '/'));
         properties.put(SCHEDULER_DB_ABSOLUTE_KEY, schedulerDb.toString().replace('\\', '/'));
+        properties.put(PIPELINE_OUTPUT_ABSOLUTE_KEY, pipelineOutput.toString().replace('\\', '/'));
 
         environment.getPropertySources().addFirst(new MapPropertySource("mcpSandbox", properties));
     }
@@ -119,8 +125,10 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
             Path sandbox,
             Path studyDb,
             Path schedulerDb,
+            Path pipelineOutput,
             ModuleLaunch studyLaunch,
-            ModuleLaunch schedulerLaunch)
+            ModuleLaunch schedulerLaunch,
+            ModuleLaunch pipelineLaunch)
             throws IOException {
         ObjectNode root = objectMapper.createObjectNode();
         ObjectNode servers = objectMapper.createObjectNode();
@@ -131,6 +139,9 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
         }
         if (schedulerLaunch != null) {
             servers.set("scheduler", buildJavaStdioServer(schedulerDb, schedulerLaunch, "SCHEDULER_DB_PATH"));
+        }
+        if (pipelineLaunch != null) {
+            servers.set("pipeline", buildPipelineStdioServer(pipelineOutput, pipelineLaunch));
         }
 
         root.set("mcpServers", servers);
@@ -186,6 +197,38 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
 
         ObjectNode env = objectMapper.createObjectNode();
         env.put(envKey, dbPath.toAbsolutePath().normalize().toString());
+        env.put("JAVA_TOOL_OPTIONS", "-Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8");
+        server.set("env", env);
+        server.set("args", args);
+        return server;
+    }
+
+    private ObjectNode buildPipelineStdioServer(Path outputDir, ModuleLaunch launch) {
+        ObjectNode server = objectMapper.createObjectNode();
+        ArrayNode args = objectMapper.createArrayNode();
+        server.put("command", "java");
+
+        ArrayNode jvmArgs = objectMapper.createArrayNode();
+        jvmArgs.add("-Dfile.encoding=UTF-8");
+        jvmArgs.add("-Dsun.jnu.encoding=UTF-8");
+
+        if (launch.jarPath() != null) {
+            for (var flag : jvmArgs) {
+                args.add(flag.asText());
+            }
+            args.add("-jar");
+            args.add(launch.jarPath().toAbsolutePath().normalize().toString());
+        } else {
+            for (var flag : jvmArgs) {
+                args.add(flag.asText());
+            }
+            args.add("-cp");
+            args.add(launch.classpath());
+            args.add(launch.mainClass());
+        }
+
+        ObjectNode env = objectMapper.createObjectNode();
+        env.put("PIPELINE_OUTPUT_DIR", outputDir.toAbsolutePath().normalize().toString());
         env.put("JAVA_TOOL_OPTIONS", "-Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8");
         server.set("env", env);
         server.set("args", args);

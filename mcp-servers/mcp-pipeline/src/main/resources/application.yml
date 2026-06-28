@@ -1,0 +1,18 @@
+spring:
+  main:
+    web-application-type: none
+    banner-mode: off
+    log-startup-info: false
+  ai:
+    mcp:
+      server:
+        name: mcp-pipeline
+        stdio: true
+
+pipeline:
+  output:
+    dir: ${PIPELINE_OUTPUT_DIR:data/pipeline}
+
+logging:
+  level:
+    root: WARN

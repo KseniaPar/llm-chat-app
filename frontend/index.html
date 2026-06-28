@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 18 — Scheduler MCP</title>
+  <title>День 19 — MCP Pipeline</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -13,7 +13,7 @@
   <div id="auth-overlay" class="auth-overlay">
     <section class="auth-card">
       <h2 class="auth-card__title">Вход в платформу</h2>
-      <p class="auth-card__desc">День 18 — планировщик и фоновые задачи через MCP</p>
+      <p class="auth-card__desc">День 19 — композиция MCP-инструментов: search → summarize → saveToFile</p>
       <div class="auth-card__tabs">
         <button id="auth-tab-login" class="auth-card__tab auth-card__tab--active" type="button">Вход</button>
         <button id="auth-tab-register" class="auth-card__tab" type="button">Регистрация</button>
@@ -41,7 +41,7 @@
             <div class="chat-header__avatar" aria-hidden="true">AI</div>
             <div class="chat-header__info">
               <h1>Агент</h1>
-              <p>День 18 — Scheduler MCP + напоминания + сводка 24/7</p>
+              <p>День 19 — MCP Pipeline: автоматическая цепочка search → summarize → saveToFile</p>
             </div>
             <span id="auth-user-label" class="chat-header__user"></span>
             <span id="loading" class="chat-header__status hidden" aria-live="polite">
@@ -57,24 +57,22 @@
           <div class="messages-empty" id="demo-panel">
             <div class="demo-panel">
               <div class="demo-panel__header">
-                <span class="demo-panel__badge">Day 18</span>
-                <h2 class="demo-panel__title">Scheduler MCP — демо</h2>
+                <span class="demo-panel__badge">Day 19</span>
+                <h2 class="demo-panel__title">MCP Pipeline — демо</h2>
                 <p class="demo-panel__desc">
-                  Сценарий: напоминание о перерыве через 30 сек — <code>scheduleReminder</code> → SQLite →
-                  <code>SchedulerRunner</code>.
+                  Выберите сценарий или напишите свой вопрос внизу — как в обычном чате.
+                  Backend запускает <code>search → summarize → saveToFile</code>, затем <strong>LLM</strong> отвечает.
                 </p>
               </div>
               <div class="demo-panel__flow" aria-hidden="true">
-                <div class="demo-panel__flow-step">💬 «Напомни о перерыве…»</div>
+                <div class="demo-panel__flow-step">💬 вопрос студента</div>
                 <div class="demo-panel__flow-arrow">↓</div>
-                <div class="demo-panel__flow-step demo-panel__flow-step--tool">⚡ <code>scheduleReminder</code></div>
+                <div class="demo-panel__flow-step">🔍 <code>search</code> → 📝 <code>summarize</code> → 💾 <code>saveToFile</code></div>
                 <div class="demo-panel__flow-arrow">↓</div>
-                <div class="demo-panel__flow-step demo-panel__flow-step--db">🗄 scheduler.db</div>
-                <div class="demo-panel__flow-arrow">↓</div>
-                <div class="demo-panel__flow-step demo-panel__flow-step--answer">⏱ SchedulerRunner · 30 сек</div>
+                <div class="demo-panel__flow-step demo-panel__flow-step--answer">🤖 LLM — ответ в чате</div>
               </div>
-              <button type="button" id="demo-run-btn" class="demo-panel__run">▶ Запустить демо</button>
-              <p class="demo-panel__hint">MCP-блок в чате · панель Scheduled Tasks справа · ~30 сек</p>
+              <div class="demo-panel__scenarios" id="demo-scenarios"></div>
+              <p class="demo-panel__hint">Или введите свой текст: «Расскажи про … и сохрани конспект в файл»</p>
             </div>
           </div>
         </div>
@@ -86,7 +84,7 @@
             id="prompt"
             class="composer__input"
             rows="1"
-            placeholder="Напишите сообщение..."
+            placeholder="Спросите про тему или попросите сохранить конспект в файл…"
           ></textarea>
           <button id="send-btn" class="composer__send" type="button" aria-label="Отправить">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -196,7 +194,17 @@
           </h3>
           <ul id="invariants-list" class="invariants-panel__list"></ul>
         </div>
-        <div id="scheduler-panel" class="scheduler-panel">
+        <div id="pipeline-panel" class="pipeline-panel hidden">
+          <h3 class="pipeline-panel__title">
+            Pipeline Runs
+            <span id="pipeline-badge" class="pipeline-panel__badge">—</span>
+          </h3>
+          <p class="pipeline-panel__hint">MCP tools ×3 · затем LLM объясняет результат</p>
+          <ol id="pipeline-steps-list" class="pipeline-panel__steps"></ol>
+          <p id="pipeline-empty" class="pipeline-panel__empty">Нажмите «Запустить пайплайн»</p>
+          <p id="pipeline-file" class="pipeline-panel__file hidden"></p>
+        </div>
+        <div id="scheduler-panel" class="scheduler-panel hidden">
           <h3 class="scheduler-panel__title">
             Scheduled Tasks
             <span id="scheduler-badge" class="scheduler-panel__badge">—</span>
@@ -214,6 +222,12 @@
           </h3>
           <p id="mcp-status-message" class="mcp-panel__message">Загрузка статуса MCP…</p>
           <p id="mcp-sandbox-path" class="mcp-panel__sandbox hidden"></p>
+          <div id="mcp-pipeline-highlight" class="mcp-panel__study-highlight hidden">
+            <span class="mcp-panel__study-label">Day 19 — пайплайн</span>
+            <code class="mcp-panel__study-tool">search</code>
+            <code class="mcp-panel__study-tool">summarize</code>
+            <code class="mcp-panel__study-tool">saveToFile</code>
+          </div>
           <div id="mcp-scheduler-highlight" class="mcp-panel__study-highlight hidden">
             <span class="mcp-panel__study-label">Day 18 — агент вызывает</span>
             <code class="mcp-panel__study-tool">scheduleReminder</code>
@@ -226,6 +240,10 @@
           </div>
           <div class="mcp-panel__actions">
             <button id="mcp-refresh-btn" class="mcp-panel__btn" type="button">Обновить</button>
+          </div>
+          <div id="mcp-pipeline-tools-wrap" class="mcp-panel__group hidden">
+            <h4 class="mcp-panel__group-title">🔗 mcp-pipeline</h4>
+            <ul id="mcp-pipeline-tools-list" class="mcp-panel__list"></ul>
           </div>
           <div id="mcp-scheduler-tools-wrap" class="mcp-panel__group hidden">
             <h4 class="mcp-panel__group-title">⏱ mcp-scheduler</h4>
