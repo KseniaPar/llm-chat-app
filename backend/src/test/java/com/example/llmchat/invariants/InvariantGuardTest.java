@@ -128,6 +128,14 @@ class InvariantGuardTest {
     }
 
     @Test
+    void allowsSchedulerReminderDuringPlanning() {
+        InvariantCheckResult result = guard.check(context(
+                "Запланируй напоминание через 2 минуты: проверить в справочнике тему про нирвану и кратко пересказать её",
+                planningState("Уточнение целей", "задать вопросы")));
+        assertFalse(result.hardBlock(), "scheduler reminder must not trigger INV-BIZ-01");
+    }
+
+    @Test
     void allowsNormalMessageWithoutViolation() {
         InvariantCheckResult result = guard.check(context(
                 "понятно, дальше",

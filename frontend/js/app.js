@@ -62,16 +62,28 @@ const mcpRefreshBtn = document.getElementById('mcp-refresh-btn');
 const mcpToolsList = document.getElementById('mcp-tools-list');
 const mcpToolsEmpty = document.getElementById('mcp-tools-empty');
 const mcpStudyHighlight = document.getElementById('mcp-study-highlight');
+const mcpSchedulerHighlight = document.getElementById('mcp-scheduler-highlight');
 const mcpStudyToolsWrap = document.getElementById('mcp-study-tools-wrap');
 const mcpStudyToolsList = document.getElementById('mcp-study-tools-list');
+const mcpSchedulerToolsWrap = document.getElementById('mcp-scheduler-tools-wrap');
+const mcpSchedulerToolsList = document.getElementById('mcp-scheduler-tools-list');
 const mcpFsToolsWrap = document.getElementById('mcp-fs-tools-wrap');
 const mcpFsToolsList = document.getElementById('mcp-fs-tools-list');
 const mcpFsCount = document.getElementById('mcp-fs-count');
+const schedulerPanel = document.getElementById('scheduler-panel');
+const schedulerBadge = document.getElementById('scheduler-badge');
+const schedulerTasksList = document.getElementById('scheduler-tasks-list');
+const schedulerTasksEmpty = document.getElementById('scheduler-tasks-empty');
+const schedulerSummary = document.getElementById('scheduler-summary');
 
 const DEMO_PROMPT =
-  'Найди в учебном справочнике тему про четыре благородные истины и кратко перескажи определение';
+  'Используй scheduleReminder: delaySeconds=30, текст «☕ Перерыв! Отойти от экрана и размяться»';
+
+const SCHEDULER_DEMO_SINCE_KEY = 'llm-chat-scheduler-demo-since';
 
 const CHAR_DELAY_MS = 18;
+const SCHEDULER_POLL_MS = 5000;
+const DEMO_POLL_MS = 3000;
 const SESSION_STORAGE_KEY = 'llm-chat-session-id';
 const JWT_STORAGE_KEY = 'llm-chat-jwt';
 const AUTH_USER_STORAGE_KEY = 'llm-chat-username';
@@ -81,6 +93,8 @@ let authToken = localStorage.getItem(JWT_STORAGE_KEY);
 let authUsernameValue = localStorage.getItem(AUTH_USER_STORAGE_KEY);
 let activeRequestId = 0;
 let sessionId = null;
+let schedulerPollTimer = null;
+let demoPollTimer = null;
 
 function getAuthToken() {
   const stored = localStorage.getItem(JWT_STORAGE_KEY);
@@ -187,7 +201,9 @@ async function handleAuthSubmit(event) {
       loadTransitions(),
       loadInvariants(),
       loadMcpTools(),
+      loadSchedulerPanel(),
     ]);
+    startSchedulerPolling();
     promptInput?.focus();
   } catch (error) {
     if (authError) {
@@ -198,6 +214,7 @@ async function handleAuthSubmit(event) {
 }
 
 function logout() {
+  stopSchedulerPolling();
   authToken = null;
   authUsernameValue = null;
   localStorage.removeItem(JWT_STORAGE_KEY);
@@ -418,6 +435,131 @@ async function loadInvariants() {
   }
 }
 
+function formatSchedulerTime(iso) {
+  if (!iso) return '—';
+  try {
+    const date = new Date(iso);
+    return date.toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+  } catch {
+    return iso;
+  }
+}
+
+function formatSchedulerCountdown(iso) {
+  if (!iso) return '';
+  try {
+    const diffMs = new Date(iso).getTime() - Date.now();
+    if (diffMs <= 0) return ' · скоро выполнится';
+    const sec = Math.ceil(diffMs / 1000);
+    if (sec < 60) return ` · через ${sec} с`;
+    return ` · через ${Math.ceil(sec / 60)} мин`;
+  } catch {
+    return '';
+  }
+}
+
+function highlightSchedulerPanel() {
+  if (!schedulerPanel) return;
+  schedulerPanel.classList.add('scheduler-panel--flash');
+  window.setTimeout(() => schedulerPanel.classList.remove('scheduler-panel--flash'), 2500);
+}
+
+function startDemoPolling() {
+  stopDemoPolling();
+  let polls = 0;
+  demoPollTimer = window.setInterval(async () => {
+    polls += 1;
+    await loadSchedulerPanel();
+    if (polls >= 20) stopDemoPolling();
+  }, DEMO_POLL_MS);
+}
+
+function stopDemoPolling() {
+  if (demoPollTimer) {
+    window.clearInterval(demoPollTimer);
+    demoPollTimer = null;
+  }
+}
+
+function renderSchedulerPanel(tasksData, summaryData) {
+  if (!schedulerPanel) return;
+  schedulerPanel.classList.remove('hidden');
+
+  const tasks = Array.isArray(tasksData?.tasks) ? tasksData.tasks : [];
+  if (schedulerBadge) {
+    schedulerBadge.textContent = String(tasks.length);
+  }
+  if (schedulerTasksList) {
+    schedulerTasksList.innerHTML = tasks.length
+      ? tasks
+          .map(
+            (task) => `<li class="scheduler-panel__item">
+          <div class="scheduler-panel__head">
+            <span class="scheduler-panel__type">${escapeHtml(task.taskType || '')}</span>
+            <span class="scheduler-panel__id">#${escapeHtml(String(task.id ?? ''))}</span>
+          </div>
+          <p class="scheduler-panel__message">${escapeHtml(task.message || '')}</p>
+          <p class="scheduler-panel__meta">Следующий запуск: ${escapeHtml(formatSchedulerTime(task.nextRun))}<strong>${escapeHtml(formatSchedulerCountdown(task.nextRun))}</strong></p>
+        </li>`,
+          )
+          .join('')
+      : '';
+  }
+  if (schedulerTasksEmpty) {
+    schedulerTasksEmpty.classList.toggle('hidden', tasks.length > 0);
+  }
+
+  if (schedulerSummary) {
+    const results = Array.isArray(summaryData?.results) ? summaryData.results : [];
+    if (!results.length) {
+      schedulerSummary.textContent = 'Пока нет выполненных задач.';
+    } else {
+      const latest = results[0];
+      let body = `[${formatSchedulerTime(latest.ranAt)}] ${latest.taskType || ''}`;
+      if (latest.message) body += `\n${latest.message}`;
+      try {
+        const parsed = JSON.parse(latest.resultJson || '{}');
+        if (parsed.message) body += `\n→ ${parsed.message}`;
+      } catch {
+        // ignore
+      }
+      schedulerSummary.textContent = body;
+    }
+  }
+}
+
+async function loadSchedulerPanel() {
+  if (!getAuthToken()) return;
+  const demoSince = sessionStorage.getItem(SCHEDULER_DEMO_SINCE_KEY);
+  const sinceParam = demoSince ? `?since=${encodeURIComponent(demoSince)}` : '';
+  try {
+    const [tasksRes, summaryRes] = await Promise.all([
+      apiFetch('/api/mcp/scheduler/tasks'),
+      apiFetch(`/api/mcp/scheduler/summary${sinceParam}`),
+    ]);
+    const tasksData = tasksRes.ok ? await tasksRes.json() : { tasks: [] };
+    const summaryData = summaryRes.ok ? await summaryRes.json() : { results: [] };
+    renderSchedulerPanel(tasksData, summaryData);
+  } catch {
+    renderSchedulerPanel({ tasks: [] }, { results: [] });
+  }
+}
+
+function startSchedulerPolling() {
+  stopSchedulerPolling();
+  if (!getAuthToken()) return;
+  schedulerPollTimer = window.setInterval(() => {
+    loadSchedulerPanel();
+  }, SCHEDULER_POLL_MS);
+}
+
+function stopSchedulerPolling() {
+  if (schedulerPollTimer) {
+    window.clearInterval(schedulerPollTimer);
+    schedulerPollTimer = null;
+  }
+}
+
 function renderMcpPanel(data) {
   if (!mcpPanel) return;
   mcpPanel.classList.remove('hidden');
@@ -447,8 +589,14 @@ function renderMcpPanel(data) {
 
   const tools = Array.isArray(data?.tools) ? data.tools : [];
   const studyTools = tools.filter((t) => t.serverName === 'mcp-study');
-  const fsTools = tools.filter((t) => t.serverName !== 'mcp-study');
+  const schedulerTools = tools.filter((t) => t.serverName === 'mcp-scheduler');
+  const fsTools = tools.filter(
+    (t) => t.serverName !== 'mcp-study' && t.serverName !== 'mcp-scheduler',
+  );
 
+  if (mcpSchedulerHighlight) {
+    mcpSchedulerHighlight.classList.toggle('hidden', !connected || schedulerTools.length === 0);
+  }
   if (mcpStudyHighlight) {
     mcpStudyHighlight.classList.toggle('hidden', !connected || studyTools.length === 0);
   }
@@ -461,6 +609,10 @@ function renderMcpPanel(data) {
           <p class="mcp-panel__desc">${escapeHtml((tool.description || '').split('\n')[0])}</p>
         </li>`;
 
+  if (mcpSchedulerToolsWrap && mcpSchedulerToolsList) {
+    mcpSchedulerToolsWrap.classList.toggle('hidden', schedulerTools.length === 0);
+    mcpSchedulerToolsList.innerHTML = schedulerTools.map((t) => renderToolItem(t, true)).join('');
+  }
   if (mcpStudyToolsWrap && mcpStudyToolsList) {
     mcpStudyToolsWrap.classList.toggle('hidden', studyTools.length === 0);
     mcpStudyToolsList.innerHTML = studyTools.map((t) => renderToolItem(t, true)).join('');
@@ -719,31 +871,36 @@ async function restoreSessionFromStorage() {
   }
 }
 
-function clearMessages() {
-  messagesEl.innerHTML = `
+function getDemoEmptyHtml() {
+  return `
     <div class="messages-empty" id="demo-panel">
       <div class="demo-panel">
         <div class="demo-panel__header">
-          <span class="demo-panel__badge">Day 17</span>
-          <h2 class="demo-panel__title">MCP Tool Calling — демо</h2>
+          <span class="demo-panel__badge">Day 18</span>
+          <h2 class="demo-panel__title">Scheduler MCP — демо</h2>
           <p class="demo-panel__desc">
-            Один клик — агент вызовет <code>searchTopic</code>, прочитает справочник и ответит фактами.
+            Сценарий: напоминание о перерыве через 30 сек — <code>scheduleReminder</code> → SQLite →
+            <code>SchedulerRunner</code>.
           </p>
         </div>
         <div class="demo-panel__flow" aria-hidden="true">
-          <div class="demo-panel__flow-step">💬 Вопрос студента</div>
+          <div class="demo-panel__flow-step">💬 «Напомни о перерыве…»</div>
           <div class="demo-panel__flow-arrow">↓</div>
-          <div class="demo-panel__flow-step demo-panel__flow-step--tool">⚡ <code>searchTopic</code> · mcp-study</div>
+          <div class="demo-panel__flow-step demo-panel__flow-step--tool">⚡ <code>scheduleReminder</code></div>
           <div class="demo-panel__flow-arrow">↓</div>
-          <div class="demo-panel__flow-step demo-panel__flow-step--db">🗄 SQLite · study-reference.db</div>
+          <div class="demo-panel__flow-step demo-panel__flow-step--db">🗄 scheduler.db</div>
           <div class="demo-panel__flow-arrow">↓</div>
-          <div class="demo-panel__flow-step demo-panel__flow-step--answer">✅ Ответ + блок MCP Tool Call</div>
+          <div class="demo-panel__flow-step demo-panel__flow-step--answer">⏱ SchedulerRunner · 30 сек</div>
         </div>
         <button type="button" id="demo-run-btn" class="demo-panel__run">▶ Запустить демо</button>
-        <p class="demo-panel__hint">Смотрите логи backend и зелёный блок над ответом агента</p>
+        <p class="demo-panel__hint">MCP-блок в чате · панель Scheduled Tasks справа · ~30 сек</p>
       </div>
     </div>
   `;
+}
+
+function clearMessages() {
+  messagesEl.innerHTML = getDemoEmptyHtml();
   initDemoPanel();
 }
 
@@ -753,20 +910,44 @@ function initDemoPanel() {
   runBtn.addEventListener('click', () => runDemoPrompt(DEMO_PROMPT));
 }
 
+async function resetSchedulerDemo() {
+  try {
+    await apiFetch('/api/mcp/scheduler/demo-reset', { method: 'POST' });
+    sessionStorage.setItem(SCHEDULER_DEMO_SINCE_KEY, new Date().toISOString());
+    await loadSchedulerPanel();
+  } catch {
+    // optional
+  }
+}
+
 async function runDemoPrompt(prompt) {
   if (!prompt?.trim()) return;
+  clearError();
+  await resetSchedulerDemo();
   promptInput.value = prompt;
   resizeInput();
-  await sendMessage(prompt);
+  const result = await sendMessage(prompt);
   promptInput.value = '';
   resizeInput();
   promptInput.focus();
+  if (!result?.ok) return;
+  const calls = result.data?.mcpToolCalls || [];
+  if (calls.some((c) => (c.toolName || '').includes('scheduleReminder'))) {
+    highlightSchedulerPanel();
+    await loadSchedulerPanel();
+    startDemoPolling();
+  }
 }
 
 function shortToolName(name) {
   if (!name) return '';
   if (name.includes('searchTopic')) return 'searchTopic';
   if (name.includes('getExamOutline')) return 'getExamOutline';
+  if (name.includes('scheduleReminder')) return 'scheduleReminder';
+  if (name.includes('schedulePeriodicSummary')) return 'schedulePeriodicSummary';
+  if (name.includes('listScheduledTasks')) return 'listScheduledTasks';
+  if (name.includes('getSummary')) return 'getSummary';
+  if (name.includes('cancelTask')) return 'cancelTask';
   return name.replace(/^.*_/, '');
 }
 
@@ -783,6 +964,20 @@ function formatMcpResultPreview(preview) {
     }
     if (Array.isArray(data.topics) && data.topics.length) {
       return data.topics.map((t, i) => `${i + 1}. ${t.topic}`).join('\n');
+    }
+    if (data.taskId && data.taskType) {
+      const delay =
+        data.delaySeconds != null
+          ? `${data.delaySeconds} сек`
+          : data.delayMinutes != null
+            ? `${data.delayMinutes} мин`
+            : '';
+      return `✅ Задача #${data.taskId} (${data.taskType})${delay ? ` · через ${delay}` : ''}${data.message ? `\n${data.message}` : ''}`;
+    }
+    if (typeof data.count === 'number' && Array.isArray(data.tasks)) {
+      return data.tasks.length
+        ? data.tasks.map((t) => `#${t.id} ${t.taskType}: ${t.message || ''}`).join('\n')
+        : 'Нет активных задач';
     }
   } catch {
     // not JSON
@@ -838,9 +1033,17 @@ function createMessageElement(role) {
 
 function appendMcpToolCalls(bubbleEl, toolCalls, insertBefore = null) {
   if (!bubbleEl || !Array.isArray(toolCalls) || toolCalls.length === 0) return;
+  const isScheduler = toolCalls.some(
+    (c) =>
+      (c.serverName || '').includes('scheduler') ||
+      (c.toolName || '').includes('schedule'),
+  );
+  const blockTitle = isScheduler
+    ? '⚡ MCP Tool Call — scheduleReminder'
+    : 'MCP Tool Call — справочник';
   const block = document.createElement('div');
-  block.className = 'message__mcp-calls';
-  block.innerHTML = `<div class="message__mcp-calls-title">MCP Tool Call — данные из справочника</div>${toolCalls
+  block.className = `message__mcp-calls${isScheduler ? ' message__mcp-calls--scheduler' : ''}`;
+  block.innerHTML = `<div class="message__mcp-calls-title">${blockTitle}</div>${toolCalls
     .map((call) => {
       const name = shortToolName(call.toolName || '');
       const result = formatMcpResultPreview(call.resultPreview || '');
@@ -1056,6 +1259,7 @@ async function sendMessage(prompt, options = {}) {
       await loadTaskState();
     }
     await loadTransitions();
+    await loadSchedulerPanel();
 
     setLoading(false);
     if (options.skipTyping) {
@@ -1127,7 +1331,11 @@ if (getAuthToken()) {
     loadTransitions(),
     loadInvariants(),
     loadMcpTools(),
-  ]).finally(() => promptInput.focus());
+    loadSchedulerPanel(),
+  ]).finally(() => {
+    startSchedulerPolling();
+    promptInput.focus();
+  });
 } else {
   showAuthOverlay();
 }

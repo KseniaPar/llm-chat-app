@@ -52,6 +52,9 @@ public class InvariantGuard {
     private static final Pattern BRIEF_CONSTRAINT = Pattern.compile(
             "\\b(кратко|до\\s+\\d+\\s+предложен|без\\s+воды|коротко)\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private static final Pattern SCHEDULER_REQUEST = Pattern.compile(
+            "\\b(?:запланиру(?:й|йте|ем|и)|напомни(?:те)?|напоминание|scheduleReminder|schedulePeriodicSummary)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern FINISH_WITHOUT_VALIDATION = Pattern.compile(
             WORD_START
                     + "(?:законч(?:и|ить|им)(?:\\s+(?:задач(?:у|и|ей|a)?|урок|занят(?:ие|ия)?))?"
@@ -141,6 +144,9 @@ public class InvariantGuard {
             InvariantContext context,
             Optional<TaskState> taskState,
             String message) {
+        if (SCHEDULER_REQUEST.matcher(message.trim()).find()) {
+            return false;
+        }
         if (!TaskStateTransitions.readyForValidation(message)
                 && !EARLY_MCQ_REQUEST.matcher(message.trim()).find()) {
             return false;

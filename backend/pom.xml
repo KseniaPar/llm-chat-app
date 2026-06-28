@@ -69,6 +69,17 @@
             </exclusions>
         </dependency>
         <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>mcp-scheduler</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.ai</groupId>
+                    <artifactId>spring-ai-starter-mcp-server</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>

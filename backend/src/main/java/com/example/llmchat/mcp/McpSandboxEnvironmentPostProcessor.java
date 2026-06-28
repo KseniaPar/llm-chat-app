@@ -19,7 +19,7 @@ import java.util.stream.Stream;
 
 /**
  * Prepares MCP sandbox directory and generates Claude Desktop-style stdio config
- * for filesystem (Day 16) and mcp-study (Day 17) servers.
+ * for filesystem (Day 16), mcp-study (Day 17), and mcp-scheduler (Day 18) servers.
  */
 public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProcessor {
 
@@ -27,6 +27,7 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
     private static final String SANDBOX_RELATIVE_KEY = "app.mcp.sandbox.relative-path";
     private static final String SERVERS_CONFIG_KEY = "app.mcp.servers-config";
     private static final String STUDY_DB_ABSOLUTE_KEY = "app.mcp.study-db.absolute";
+    private static final String SCHEDULER_DB_ABSOLUTE_KEY = "app.mcp.scheduler-db.absolute";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -35,6 +36,7 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
         String relativePath = environment.getProperty(SANDBOX_RELATIVE_KEY, "data/mcp-sandbox");
         Path sandbox = Paths.get(relativePath).toAbsolutePath().normalize();
         Path studyDb = Paths.get("data/study-reference.db").toAbsolutePath().normalize();
+        Path schedulerDb = Paths.get("data/scheduler.db").toAbsolutePath().normalize();
         try {
             Files.createDirectories(sandbox);
             Path readme = sandbox.resolve("readme.txt");
@@ -50,14 +52,19 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
             if (studyDb.getParent() != null) {
                 Files.createDirectories(studyDb.getParent());
             }
+            if (schedulerDb.getParent() != null) {
+                Files.createDirectories(schedulerDb.getParent());
+            }
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to prepare MCP directories: " + sandbox, exception);
         }
 
         Path configFile = sandbox.resolve("mcp-servers.generated.json");
-        StudyLaunch studyLaunch = resolveStudyLaunch();
+        ModuleLaunch studyLaunch = resolveModuleLaunch("mcp-study", "com.example.mcp.study.StudyMcpApplication");
+        ModuleLaunch schedulerLaunch =
+                resolveModuleLaunch("mcp-scheduler", "com.example.mcp.scheduler.SchedulerMcpApplication");
         try {
-            writeServersConfig(configFile, sandbox, studyDb, studyLaunch);
+            writeServersConfig(configFile, sandbox, studyDb, schedulerDb, studyLaunch, schedulerLaunch);
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to write MCP servers config: " + configFile, exception);
         }
@@ -66,14 +73,15 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
         properties.put(SANDBOX_ABSOLUTE_KEY, sandbox.toString().replace('\\', '/'));
         properties.put(SERVERS_CONFIG_KEY, configFile.toAbsolutePath().normalize().toString().replace('\\', '/'));
         properties.put(STUDY_DB_ABSOLUTE_KEY, studyDb.toString().replace('\\', '/'));
+        properties.put(SCHEDULER_DB_ABSOLUTE_KEY, schedulerDb.toString().replace('\\', '/'));
 
         environment.getPropertySources().addFirst(new MapPropertySource("mcpSandbox", properties));
     }
 
-    private StudyLaunch resolveStudyLaunch() {
+    private ModuleLaunch resolveModuleLaunch(String moduleName, String mainClass) {
         Path[] moduleRoots = {
-                Paths.get("..", "mcp-servers", "mcp-study"),
-                Paths.get("mcp-servers", "mcp-study"),
+                Paths.get("..", "mcp-servers", moduleName),
+                Paths.get("mcp-servers", moduleName),
         };
         for (Path moduleRoot : moduleRoots) {
             Path absoluteRoot = moduleRoot.toAbsolutePath().normalize();
@@ -82,14 +90,14 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
             if (Files.isDirectory(classes) && Files.isDirectory(dependencyDir)) {
                 try {
                     String classpath = buildClasspath(classes, dependencyDir);
-                    return new StudyLaunch(classpath, "com.example.mcp.study.StudyMcpApplication");
+                    return new ModuleLaunch(classpath, mainClass);
                 } catch (IOException exception) {
                     return null;
                 }
             }
-            Path bootJar = absoluteRoot.resolve("target/mcp-study-0.0.1-SNAPSHOT.jar");
+            Path bootJar = absoluteRoot.resolve("target/" + moduleName + "-0.0.1-SNAPSHOT.jar");
             if (Files.isRegularFile(bootJar)) {
-                return new StudyLaunch(null, null, bootJar);
+                return new ModuleLaunch(null, null, bootJar);
             }
         }
         return null;
@@ -106,14 +114,23 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
         }
     }
 
-    private void writeServersConfig(Path configFile, Path sandbox, Path studyDb, StudyLaunch studyLaunch)
+    private void writeServersConfig(
+            Path configFile,
+            Path sandbox,
+            Path studyDb,
+            Path schedulerDb,
+            ModuleLaunch studyLaunch,
+            ModuleLaunch schedulerLaunch)
             throws IOException {
         ObjectNode root = objectMapper.createObjectNode();
         ObjectNode servers = objectMapper.createObjectNode();
 
         servers.set("filesystem", buildFilesystemServer(sandbox));
         if (studyLaunch != null) {
-            servers.set("study", buildStudyServer(studyDb, studyLaunch));
+            servers.set("study", buildJavaStdioServer(studyDb, studyLaunch, "STUDY_DB_PATH"));
+        }
+        if (schedulerLaunch != null) {
+            servers.set("scheduler", buildJavaStdioServer(schedulerDb, schedulerLaunch, "SCHEDULER_DB_PATH"));
         }
 
         root.set("mcpServers", servers);
@@ -143,44 +160,44 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
         return filesystem;
     }
 
-    private ObjectNode buildStudyServer(Path studyDb, StudyLaunch studyLaunch) {
-        ObjectNode study = objectMapper.createObjectNode();
+    private ObjectNode buildJavaStdioServer(Path dbPath, ModuleLaunch launch, String envKey) {
+        ObjectNode server = objectMapper.createObjectNode();
         ArrayNode args = objectMapper.createArrayNode();
-        study.put("command", "java");
+        server.put("command", "java");
 
         ArrayNode jvmArgs = objectMapper.createArrayNode();
         jvmArgs.add("-Dfile.encoding=UTF-8");
         jvmArgs.add("-Dsun.jnu.encoding=UTF-8");
 
-        if (studyLaunch.jarPath() != null) {
+        if (launch.jarPath() != null) {
             for (var flag : jvmArgs) {
                 args.add(flag.asText());
             }
             args.add("-jar");
-            args.add(studyLaunch.jarPath().toAbsolutePath().normalize().toString());
+            args.add(launch.jarPath().toAbsolutePath().normalize().toString());
         } else {
             for (var flag : jvmArgs) {
                 args.add(flag.asText());
             }
             args.add("-cp");
-            args.add(studyLaunch.classpath());
-            args.add(studyLaunch.mainClass());
+            args.add(launch.classpath());
+            args.add(launch.mainClass());
         }
 
         ObjectNode env = objectMapper.createObjectNode();
-        env.put("STUDY_DB_PATH", studyDb.toAbsolutePath().normalize().toString());
+        env.put(envKey, dbPath.toAbsolutePath().normalize().toString());
         env.put("JAVA_TOOL_OPTIONS", "-Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8");
-        study.set("env", env);
-        study.set("args", args);
-        return study;
+        server.set("env", env);
+        server.set("args", args);
+        return server;
     }
 
     private boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase().contains("win");
     }
 
-    private record StudyLaunch(String classpath, String mainClass, Path jarPath) {
-        StudyLaunch(String classpath, String mainClass) {
+    private record ModuleLaunch(String classpath, String mainClass, Path jarPath) {
+        ModuleLaunch(String classpath, String mainClass) {
             this(classpath, mainClass, null);
         }
     }

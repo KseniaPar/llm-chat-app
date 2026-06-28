@@ -16,5 +16,6 @@
 
     <modules>
         <module>mcp-study</module>
+        <module>mcp-scheduler</module>
     </modules>
 </project>
