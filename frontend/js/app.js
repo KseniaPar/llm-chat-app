@@ -62,28 +62,59 @@ const mcpRefreshBtn = document.getElementById('mcp-refresh-btn');
 const mcpToolsList = document.getElementById('mcp-tools-list');
 const mcpToolsEmpty = document.getElementById('mcp-tools-empty');
 const mcpStudyHighlight = document.getElementById('mcp-study-highlight');
+const mcpPipelineHighlight = document.getElementById('mcp-pipeline-highlight');
 const mcpSchedulerHighlight = document.getElementById('mcp-scheduler-highlight');
 const mcpStudyToolsWrap = document.getElementById('mcp-study-tools-wrap');
 const mcpStudyToolsList = document.getElementById('mcp-study-tools-list');
+const mcpPipelineToolsWrap = document.getElementById('mcp-pipeline-tools-wrap');
+const mcpPipelineToolsList = document.getElementById('mcp-pipeline-tools-list');
 const mcpSchedulerToolsWrap = document.getElementById('mcp-scheduler-tools-wrap');
 const mcpSchedulerToolsList = document.getElementById('mcp-scheduler-tools-list');
 const mcpFsToolsWrap = document.getElementById('mcp-fs-tools-wrap');
 const mcpFsToolsList = document.getElementById('mcp-fs-tools-list');
 const mcpFsCount = document.getElementById('mcp-fs-count');
+const pipelinePanel = document.getElementById('pipeline-panel');
+const pipelineBadge = document.getElementById('pipeline-badge');
+const pipelineStepsList = document.getElementById('pipeline-steps-list');
+const pipelineEmpty = document.getElementById('pipeline-empty');
+const pipelineFile = document.getElementById('pipeline-file');
 const schedulerPanel = document.getElementById('scheduler-panel');
 const schedulerBadge = document.getElementById('scheduler-badge');
 const schedulerTasksList = document.getElementById('scheduler-tasks-list');
 const schedulerTasksEmpty = document.getElementById('scheduler-tasks-empty');
 const schedulerSummary = document.getElementById('scheduler-summary');
 
-const DEMO_PROMPT =
-  'Используй scheduleReminder: delaySeconds=30, текст «☕ Перерыв! Отойти от экрана и размяться»';
+const PIPELINE_SCENARIOS = [
+  {
+    id: 'islam-pillars',
+    label: 'Пять столпов ислама',
+    userMessage: 'Готовлюсь к экзамену по исламу — можно краткий конспект про пять столпов?',
+    query: 'пять столпов ислама',
+    filename: 'islam-pillars.txt',
+    triggers: ['пять столпов', 'столпов ислама', 'столп ислам'],
+  },
+  {
+    id: 'iman',
+    label: 'Шесть столпов веры',
+    userMessage: 'Чем иман отличается от ежедневной практики? Хочу сохранить это в шпаргалку.',
+    query: 'шесть столпов веры',
+    filename: 'iman-notes.txt',
+    triggers: ['иман', 'столпов веры', 'шесть столпов'],
+  },
+  {
+    id: 'ramadan',
+    label: 'Пост в Рамадан',
+    userMessage: 'Расскажи про пост в Рамадан — и сохрани основные тезисы в файл, пожалуйста.',
+    query: 'пост рамадан',
+    filename: 'ramadan-notes.txt',
+    triggers: ['рамадан', 'саум', 'пост ислам'],
+  },
+];
 
 const SCHEDULER_DEMO_SINCE_KEY = 'llm-chat-scheduler-demo-since';
 
 const CHAR_DELAY_MS = 18;
 const SCHEDULER_POLL_MS = 5000;
-const DEMO_POLL_MS = 3000;
 const SESSION_STORAGE_KEY = 'llm-chat-session-id';
 const JWT_STORAGE_KEY = 'llm-chat-jwt';
 const AUTH_USER_STORAGE_KEY = 'llm-chat-username';
@@ -94,7 +125,6 @@ let authUsernameValue = localStorage.getItem(AUTH_USER_STORAGE_KEY);
 let activeRequestId = 0;
 let sessionId = null;
 let schedulerPollTimer = null;
-let demoPollTimer = null;
 
 function getAuthToken() {
   const stored = localStorage.getItem(JWT_STORAGE_KEY);
@@ -201,9 +231,8 @@ async function handleAuthSubmit(event) {
       loadTransitions(),
       loadInvariants(),
       loadMcpTools(),
-      loadSchedulerPanel(),
     ]);
-    startSchedulerPolling();
+    if (pipelinePanel) pipelinePanel.classList.remove('hidden');
     promptInput?.focus();
   } catch (error) {
     if (authError) {
@@ -458,26 +487,50 @@ function formatSchedulerCountdown(iso) {
   }
 }
 
-function highlightSchedulerPanel() {
-  if (!schedulerPanel) return;
-  schedulerPanel.classList.add('scheduler-panel--flash');
-  window.setTimeout(() => schedulerPanel.classList.remove('scheduler-panel--flash'), 2500);
+function highlightPipelinePanel() {
+  if (!pipelinePanel) return;
+  pipelinePanel.classList.add('pipeline-panel--flash');
+  window.setTimeout(() => pipelinePanel.classList.remove('pipeline-panel--flash'), 2500);
 }
 
-function startDemoPolling() {
-  stopDemoPolling();
-  let polls = 0;
-  demoPollTimer = window.setInterval(async () => {
-    polls += 1;
-    await loadSchedulerPanel();
-    if (polls >= 20) stopDemoPolling();
-  }, DEMO_POLL_MS);
-}
+function renderPipelinePanel(data) {
+  if (!pipelinePanel) return;
+  pipelinePanel.classList.remove('hidden');
 
-function stopDemoPolling() {
-  if (demoPollTimer) {
-    window.clearInterval(demoPollTimer);
-    demoPollTimer = null;
+  const steps = Array.isArray(data?.steps) ? data.steps : [];
+  if (pipelineBadge) {
+    pipelineBadge.textContent = steps.length ? `${steps.length}/3` : '—';
+  }
+  if (pipelineStepsList) {
+    pipelineStepsList.innerHTML = steps
+      .map((step) => {
+        const tool = escapeHtml(step.toolName || '');
+        const preview = escapeHtml(formatMcpResultPreview(fixMojibake(step.resultPreview || '')));
+        const args = escapeHtml((step.arguments || '').slice(0, 120));
+        const ms = step.durationMs != null ? `${step.durationMs} ms` : '';
+        return `<li class="pipeline-panel__step pipeline-panel__step--done">
+          <div class="pipeline-panel__step-head">
+            <span class="pipeline-panel__step-num">${step.step ?? ''}</span>
+            <code class="pipeline-panel__step-tool">${tool}</code>
+            <span class="pipeline-panel__step-ms">${ms}</span>
+          </div>
+          <p class="pipeline-panel__step-args">args: ${args}${(step.arguments || '').length > 120 ? '…' : ''}</p>
+          <p class="pipeline-panel__step-result">${preview}</p>
+        </li>`;
+      })
+      .join('');
+  }
+  if (pipelineEmpty) {
+    pipelineEmpty.classList.toggle('hidden', steps.length > 0);
+  }
+  if (pipelineFile) {
+    if (data?.filePath) {
+      pipelineFile.textContent = `💾 ${data.filePath}`;
+      pipelineFile.classList.remove('hidden');
+    } else {
+      pipelineFile.classList.add('hidden');
+      pipelineFile.textContent = '';
+    }
   }
 }
 
@@ -589,11 +642,18 @@ function renderMcpPanel(data) {
 
   const tools = Array.isArray(data?.tools) ? data.tools : [];
   const studyTools = tools.filter((t) => t.serverName === 'mcp-study');
+  const pipelineTools = tools.filter((t) => t.serverName === 'mcp-pipeline');
   const schedulerTools = tools.filter((t) => t.serverName === 'mcp-scheduler');
   const fsTools = tools.filter(
-    (t) => t.serverName !== 'mcp-study' && t.serverName !== 'mcp-scheduler',
+    (t) =>
+      t.serverName !== 'mcp-study'
+      && t.serverName !== 'mcp-scheduler'
+      && t.serverName !== 'mcp-pipeline',
   );
 
+  if (mcpPipelineHighlight) {
+    mcpPipelineHighlight.classList.toggle('hidden', !connected || pipelineTools.length === 0);
+  }
   if (mcpSchedulerHighlight) {
     mcpSchedulerHighlight.classList.toggle('hidden', !connected || schedulerTools.length === 0);
   }
@@ -609,6 +669,10 @@ function renderMcpPanel(data) {
           <p class="mcp-panel__desc">${escapeHtml((tool.description || '').split('\n')[0])}</p>
         </li>`;
 
+  if (mcpPipelineToolsWrap && mcpPipelineToolsList) {
+    mcpPipelineToolsWrap.classList.toggle('hidden', pipelineTools.length === 0);
+    mcpPipelineToolsList.innerHTML = pipelineTools.map((t) => renderToolItem(t, true)).join('');
+  }
   if (mcpSchedulerToolsWrap && mcpSchedulerToolsList) {
     mcpSchedulerToolsWrap.classList.toggle('hidden', schedulerTools.length === 0);
     mcpSchedulerToolsList.innerHTML = schedulerTools.map((t) => renderToolItem(t, true)).join('');
@@ -871,29 +935,62 @@ async function restoreSessionFromStorage() {
   }
 }
 
+function resolvePipelineScenario(text) {
+  const normalized = (text || '').trim().toLowerCase();
+  if (!normalized) return null;
+
+  for (const scenario of PIPELINE_SCENARIOS) {
+    if (scenario.triggers.some((trigger) => normalized.includes(trigger))) {
+      return scenario;
+    }
+  }
+
+  const wantsSave = /конспект|шпаргал|сохран|в файл|запиши/i.test(normalized);
+  const wantsSearch = /найди|собери|материал|расскажи|объясни|про\s+/i.test(normalized);
+  if (wantsSave && wantsSearch) {
+    return {
+      id: 'custom',
+      label: 'Свой запрос',
+      userMessage: text.trim(),
+      query: text.trim().replace(/^(найди|собери|расскажи|объясни)\s+(про\s+)?/i, '').slice(0, 120),
+      filename: 'notes.txt',
+      triggers: [],
+    };
+  }
+
+  return null;
+}
+
+function renderPipelineScenariosHtml() {
+  return PIPELINE_SCENARIOS.map(
+    (scenario) => `<button type="button" class="demo-panel__scenario" data-scenario-id="${scenario.id}">
+        <span class="demo-panel__scenario-label">${escapeHtml(scenario.label)}</span>
+        <span class="demo-panel__scenario-msg">${escapeHtml(scenario.userMessage)}</span>
+      </button>`,
+  ).join('');
+}
+
 function getDemoEmptyHtml() {
   return `
     <div class="messages-empty" id="demo-panel">
       <div class="demo-panel">
         <div class="demo-panel__header">
-          <span class="demo-panel__badge">Day 18</span>
-          <h2 class="demo-panel__title">Scheduler MCP — демо</h2>
+          <span class="demo-panel__badge">Day 19</span>
+          <h2 class="demo-panel__title">MCP Pipeline — демо</h2>
           <p class="demo-panel__desc">
-            Сценарий: напоминание о перерыве через 30 сек — <code>scheduleReminder</code> → SQLite →
-            <code>SchedulerRunner</code>.
+            Выберите сценарий или напишите свой вопрос внизу — как в обычном чате.
+            Backend запускает <code>search → summarize → saveToFile</code>, затем <strong>LLM</strong> отвечает.
           </p>
         </div>
         <div class="demo-panel__flow" aria-hidden="true">
-          <div class="demo-panel__flow-step">💬 «Напомни о перерыве…»</div>
+          <div class="demo-panel__flow-step">💬 вопрос студента</div>
           <div class="demo-panel__flow-arrow">↓</div>
-          <div class="demo-panel__flow-step demo-panel__flow-step--tool">⚡ <code>scheduleReminder</code></div>
+          <div class="demo-panel__flow-step">🔍 <code>search</code> → 📝 <code>summarize</code> → 💾 <code>saveToFile</code></div>
           <div class="demo-panel__flow-arrow">↓</div>
-          <div class="demo-panel__flow-step demo-panel__flow-step--db">🗄 scheduler.db</div>
-          <div class="demo-panel__flow-arrow">↓</div>
-          <div class="demo-panel__flow-step demo-panel__flow-step--answer">⏱ SchedulerRunner · 30 сек</div>
+          <div class="demo-panel__flow-step demo-panel__flow-step--answer">🤖 LLM — ответ в чате</div>
         </div>
-        <button type="button" id="demo-run-btn" class="demo-panel__run">▶ Запустить демо</button>
-        <p class="demo-panel__hint">MCP-блок в чате · панель Scheduled Tasks справа · ~30 сек</p>
+        <div class="demo-panel__scenarios">${renderPipelineScenariosHtml()}</div>
+        <p class="demo-panel__hint">Или введите свой текст: «Расскажи про … и сохрани конспект в файл»</p>
       </div>
     </div>
   `;
@@ -905,37 +1002,62 @@ function clearMessages() {
 }
 
 function initDemoPanel() {
-  const runBtn = document.getElementById('demo-run-btn');
-  if (!runBtn) return;
-  runBtn.addEventListener('click', () => runDemoPrompt(DEMO_PROMPT));
-}
-
-async function resetSchedulerDemo() {
-  try {
-    await apiFetch('/api/mcp/scheduler/demo-reset', { method: 'POST' });
-    sessionStorage.setItem(SCHEDULER_DEMO_SINCE_KEY, new Date().toISOString());
-    await loadSchedulerPanel();
-  } catch {
-    // optional
+  const wrap = document.getElementById('demo-scenarios');
+  if (wrap) {
+    wrap.innerHTML = renderPipelineScenariosHtml();
   }
+  document.querySelectorAll('.demo-panel__scenario').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-scenario-id');
+      const scenario = PIPELINE_SCENARIOS.find((s) => s.id === id);
+      if (scenario) runPipelineWithScenario(scenario);
+    });
+  });
 }
 
-async function runDemoPrompt(prompt) {
-  if (!prompt?.trim()) return;
+async function runPipelineWithScenario(scenario) {
+  if (!scenario?.query) return;
   clearError();
-  await resetSchedulerDemo();
-  promptInput.value = prompt;
-  resizeInput();
-  const result = await sendMessage(prompt);
-  promptInput.value = '';
-  resizeInput();
-  promptInput.focus();
-  if (!result?.ok) return;
-  const calls = result.data?.mcpToolCalls || [];
-  if (calls.some((c) => (c.toolName || '').includes('scheduleReminder'))) {
-    highlightSchedulerPanel();
-    await loadSchedulerPanel();
-    startDemoPolling();
+  const demoPanel = document.getElementById('demo-panel');
+  if (demoPanel) demoPanel.remove();
+  clearEmptyState();
+
+  appendMessage('user', scenario.userMessage);
+
+  setLoading(true);
+  setControlsDisabled(true);
+
+  try {
+    const response = await apiFetch('/api/mcp/pipeline/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: scenario.query,
+        filename: scenario.filename,
+      }),
+    });
+    const data = response.ok ? await response.json() : null;
+    if (!response.ok) {
+      const errText = data?.message || `HTTP ${response.status}`;
+      showError(errText);
+      appendMessage('assistant', `Не удалось выполнить пайплайн: ${errText}`);
+      return;
+    }
+
+    renderPipelinePanel(data);
+    highlightPipelinePanel();
+
+    const assistantText =
+      fixMojibake(data.assistantMessage)
+      || 'Пайплайн выполнен. Смотрите шаги справа и MCP-блоки ниже.';
+    await appendMessageGradually('assistant', assistantText, data.mcpToolCalls || []);
+    await loadMcpTools();
+  } catch (error) {
+    showError(error.message || 'Pipeline failed');
+    appendMessage('assistant', `Ошибка: ${error.message || 'pipeline failed'}`);
+  } finally {
+    setLoading(false);
+    setControlsDisabled(false);
   }
 }
 
@@ -943,6 +1065,9 @@ function shortToolName(name) {
   if (!name) return '';
   if (name.includes('searchTopic')) return 'searchTopic';
   if (name.includes('getExamOutline')) return 'getExamOutline';
+  if (name.includes('saveToFile')) return 'saveToFile';
+  if (name.includes('summarize')) return 'summarize';
+  if (name.includes('search')) return 'search';
   if (name.includes('scheduleReminder')) return 'scheduleReminder';
   if (name.includes('schedulePeriodicSummary')) return 'schedulePeriodicSummary';
   if (name.includes('listScheduledTasks')) return 'listScheduledTasks';
@@ -951,11 +1076,37 @@ function shortToolName(name) {
   return name.replace(/^.*_/, '');
 }
 
+function fixMojibake(text) {
+  if (!text || (!text.includes('Р') && !text.includes('Ð'))) return text;
+  try {
+    const bytes = new Uint8Array([...text].map((ch) => ch.charCodeAt(0) & 0xff));
+    const decoded = new TextDecoder('utf-8').decode(bytes);
+    if (/[а-яё]/i.test(decoded)) return decoded;
+  } catch {
+    // ignore
+  }
+  return text;
+}
+
 function formatMcpResultPreview(preview) {
   if (!preview) return '';
-  const raw = preview.endsWith('...') ? preview.slice(0, -3) : preview;
+  const raw = preview.endsWith('…') ? preview.slice(0, -1) : preview;
   try {
     const data = JSON.parse(raw);
+    if (Array.isArray(data.items) && data.items.length) {
+      return data.items
+        .slice(0, 3)
+        .map((item) => `📌 ${fixMojibake(item.title || '')}\n   ${fixMojibake((item.snippet || '').slice(0, 100))}`)
+        .join('\n\n');
+    }
+    if (data.summary || Array.isArray(data.keyPoints)) {
+      const points = (data.keyPoints || []).slice(0, 3).map((p) => `• ${fixMojibake(String(p))}`).join('\n');
+      const summary = fixMojibake((data.summary || '').slice(0, 180));
+      return points ? `${summary}\n${points}` : summary;
+    }
+    if (data.path || data.filename) {
+      return `💾 ${fixMojibake(data.path || data.filename || '')}`;
+    }
     if (Array.isArray(data.matches) && data.matches.length) {
       return data.matches
         .slice(0, 3)
@@ -1033,16 +1184,25 @@ function createMessageElement(role) {
 
 function appendMcpToolCalls(bubbleEl, toolCalls, insertBefore = null) {
   if (!bubbleEl || !Array.isArray(toolCalls) || toolCalls.length === 0) return;
-  const isScheduler = toolCalls.some(
+  const isPipeline = toolCalls.some(
+    (c) =>
+      (c.serverName || '').includes('pipeline')
+      || ['search', 'summarize', 'saveToFile'].some((t) => (c.toolName || '').includes(t)),
+  );
+  const isScheduler = !isPipeline && toolCalls.some(
     (c) =>
       (c.serverName || '').includes('scheduler') ||
       (c.toolName || '').includes('schedule'),
   );
-  const blockTitle = isScheduler
-    ? '⚡ MCP Tool Call — scheduleReminder'
-    : 'MCP Tool Call — справочник';
+  const blockTitle = isPipeline
+    ? '🔗 MCP Pipeline (3 tools) + ответ LLM ниже'
+    : isScheduler
+      ? '⚡ MCP Tool Call — scheduleReminder'
+      : 'MCP Tool Call — справочник';
   const block = document.createElement('div');
-  block.className = `message__mcp-calls${isScheduler ? ' message__mcp-calls--scheduler' : ''}`;
+  block.className = `message__mcp-calls${
+    isPipeline ? ' message__mcp-calls--pipeline' : isScheduler ? ' message__mcp-calls--scheduler' : ''
+  }`;
   block.innerHTML = `<div class="message__mcp-calls-title">${blockTitle}</div>${toolCalls
     .map((call) => {
       const name = shortToolName(call.toolName || '');
@@ -1259,7 +1419,6 @@ async function sendMessage(prompt, options = {}) {
       await loadTaskState();
     }
     await loadTransitions();
-    await loadSchedulerPanel();
 
     setLoading(false);
     if (options.skipTyping) {
@@ -1294,8 +1453,18 @@ async function sendPrompt() {
     return;
   }
   clearError();
+  const pipelineScenario = resolvePipelineScenario(prompt);
   promptInput.value = '';
   resizeInput();
+  if (pipelineScenario) {
+    await runPipelineWithScenario({
+      ...pipelineScenario,
+      userMessage: prompt,
+      query: pipelineScenario.query || prompt,
+    });
+    promptInput.focus();
+    return;
+  }
   await sendMessage(prompt);
   promptInput.focus();
 }
@@ -1331,9 +1500,8 @@ if (getAuthToken()) {
     loadTransitions(),
     loadInvariants(),
     loadMcpTools(),
-    loadSchedulerPanel(),
   ]).finally(() => {
-    startSchedulerPolling();
+    if (pipelinePanel) pipelinePanel.classList.remove('hidden');
     promptInput.focus();
   });
 } else {
