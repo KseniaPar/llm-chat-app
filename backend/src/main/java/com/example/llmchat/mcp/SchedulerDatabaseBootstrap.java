@@ -44,6 +44,11 @@ public class SchedulerDatabaseBootstrap {
             JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
             SchedulerStore.ensureSchema(jdbcTemplate);
 
+            int cancelledPeriodic = SchedulerStore.cancelActivePeriodicSummaries(jdbcTemplate);
+            if (cancelledPeriodic > 0) {
+                log.info("Cancelled {} periodic summary task(s) (demo cleanup)", cancelledPeriodic);
+            }
+
             Integer count = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM scheduled_tasks WHERE status = 'active'", Integer.class);
             log.info("Scheduler DB ready at {} — {} active task(s)", path, count);

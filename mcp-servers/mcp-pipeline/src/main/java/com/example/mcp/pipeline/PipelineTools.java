@@ -41,13 +41,13 @@ public class PipelineTools {
             First step of the pipeline — use before summarize.""")
     public Map<String, Object> search(
             @ToolParam(description = "Search query, e.g. 'пять столпов ислама'") String query) {
-        String normalized = McpEncodingFix.normalize(query);
+        String normalized = McpEncodingFix.normalizeFull(query);
         List<Map<String, Object>> items = PipelineCorpus.search(normalized != null ? normalized : "");
         log.info("search query='{}' -> {} item(s)", normalized, items.size());
         List<Map<String, Object>> encodedItems = items.stream()
                 .map(item -> Map.<String, Object>of(
-                        "title", McpEncodingFix.normalize(String.valueOf(item.get("title"))),
-                        "snippet", McpEncodingFix.normalize(String.valueOf(item.get("snippet"))),
+                        "title", McpEncodingFix.normalizeFull(String.valueOf(item.get("title"))),
+                        "snippet", McpEncodingFix.normalizeFull(String.valueOf(item.get("snippet"))),
                         "url", item.get("url")))
                 .toList();
         return Map.of(
@@ -73,8 +73,8 @@ public class PipelineTools {
         Set<String> keyPoints = new LinkedHashSet<>();
         for (int i = 0; i < items.size(); i++) {
             Map<String, Object> item = items.get(i);
-            String title = McpEncodingFix.normalize(stringValue(item.get("title")));
-            String snippet = McpEncodingFix.normalize(stringValue(item.get("snippet")));
+            String title = McpEncodingFix.normalizeFull(stringValue(item.get("title")));
+            String snippet = McpEncodingFix.normalizeFull(stringValue(item.get("snippet")));
             if (!title.isBlank()) {
                 summary.append(i + 1).append(". ").append(title).append(" — ");
             }
@@ -97,11 +97,26 @@ public class PipelineTools {
             points = points.subList(0, 5);
         }
 
+        String formatted = formatKonspekt(summary.toString().trim(), points);
+
         log.info("summarize {} item(s) -> {} key point(s)", items.size(), points.size());
         return Map.of(
-                "summary", summary.toString().trim(),
+                "summary", formatted,
                 "keyPoints", points,
                 "sourceCount", items.size());
+    }
+
+    private static String formatKonspekt(String body, List<String> keyPoints) {
+        StringBuilder file = new StringBuilder();
+        file.append("Конспект\n").append("========\n\n");
+        file.append(body);
+        if (!keyPoints.isEmpty()) {
+            file.append("\n\nКлючевые пункты:\n");
+            for (String point : keyPoints) {
+                file.append("• ").append(point).append('\n');
+            }
+        }
+        return file.toString().trim();
     }
 
     @Tool(description = """
@@ -114,7 +129,7 @@ public class PipelineTools {
         if (safeName.isBlank()) {
             safeName = "pipeline-output.txt";
         }
-        String body = McpEncodingFix.normalize(summary != null ? summary : "");
+        String body = McpEncodingFix.normalizeFull(summary != null ? summary : "");
         try {
             Files.createDirectories(outputDir);
             Path target = outputDir.resolve(safeName).normalize();
@@ -143,11 +158,24 @@ public class PipelineTools {
             return List.of();
         }
         try {
-            return objectMapper.readValue(itemsJson, ITEM_LIST_TYPE);
+            List<Map<String, Object>> items = objectMapper.readValue(itemsJson, ITEM_LIST_TYPE);
+            return items.stream().map(PipelineTools::normalizeItem).toList();
         } catch (Exception exception) {
             log.warn("Failed to parse itemsJson: {}", exception.getMessage());
             return List.of();
         }
+    }
+
+    private static Map<String, Object> normalizeItem(Map<String, Object> item) {
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        item.forEach((key, value) -> {
+            if (value instanceof String text) {
+                normalized.put(key, McpEncodingFix.normalizeFull(text));
+            } else {
+                normalized.put(key, value);
+            }
+        });
+        return normalized;
     }
 
     private static String sanitizeFilename(String filename) {

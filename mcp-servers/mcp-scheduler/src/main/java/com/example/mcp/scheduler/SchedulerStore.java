@@ -100,8 +100,32 @@ public final class SchedulerStore {
                 STATUS_CANCELLED);
     }
 
+    /** Demo periodic digests should not clutter the notifications panel. */
+    public static int cancelActivePeriodicSummaries(JdbcTemplate jdbcTemplate) {
+        return jdbcTemplate.update(
+                "UPDATE scheduled_tasks SET status = ? WHERE status = 'active' AND task_type = ?",
+                STATUS_CANCELLED,
+                TASK_PERIODIC_SUMMARY);
+    }
+
     public static int deleteAllResults(JdbcTemplate jdbcTemplate) {
         return jdbcTemplate.update("DELETE FROM task_results");
+    }
+
+    public static Map<String, Object> getSummaryStats(JdbcTemplate jdbcTemplate, Instant since) {
+        Instant boundary = since != null ? since : Instant.now().minus(24, ChronoUnit.HOURS);
+        String sinceIso = boundary.toString();
+
+        Integer activeCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM scheduled_tasks WHERE status = 'active'", Integer.class);
+        Integer completedCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM task_results WHERE ran_at >= ?", Integer.class, sinceIso);
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("since", sinceIso);
+        summary.put("activeTaskCount", activeCount != null ? activeCount : 0);
+        summary.put("resultCount", completedCount != null ? completedCount : 0);
+        return summary;
     }
 
     public static Map<String, Object> getSummary(JdbcTemplate jdbcTemplate, Instant since) {
@@ -110,7 +134,7 @@ public final class SchedulerStore {
 
         List<Map<String, Object>> results = jdbcTemplate.query(
                 """
-                        SELECT r.id, r.task_id, r.ran_at, r.result_json, t.task_type, t.message
+                        SELECT r.id, r.task_id, r.ran_at, SUBSTR(r.result_json, 1, 2000) AS result_json, t.task_type, t.message
                         FROM task_results r
                         JOIN scheduled_tasks t ON t.id = r.task_id
                         WHERE r.ran_at >= ?
@@ -129,15 +153,7 @@ public final class SchedulerStore {
                 },
                 sinceIso);
 
-        Integer activeCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM scheduled_tasks WHERE status = 'active'", Integer.class);
-        Integer completedCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM task_results WHERE ran_at >= ?", Integer.class, sinceIso);
-
-        Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("since", sinceIso);
-        summary.put("activeTaskCount", activeCount != null ? activeCount : 0);
-        summary.put("resultCount", completedCount != null ? completedCount : 0);
+        Map<String, Object> summary = getSummaryStats(jdbcTemplate, since);
         summary.put("results", results);
         return summary;
     }

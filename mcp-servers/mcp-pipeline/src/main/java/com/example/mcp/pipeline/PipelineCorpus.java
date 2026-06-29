@@ -4,7 +4,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-final class PipelineCorpus {
+import java.util.Optional;
+
+public final class PipelineCorpus {
 
     record Item(String title, String snippet, String url, List<String> keywords) {
     }
@@ -65,6 +67,13 @@ final class PipelineCorpus {
                     "corpus://islam/mosque",
                     List.of("мечеть", "намаз", "ислам")),
             new Item(
+                    "Шариат — источники исламского права",
+                    "Шариат — исламская правовая система, основанная на четырёх источниках: "
+                            + "Коран, Сунна, иджма (единогласие учёных) и кийас (судебное сравнение). "
+                            + "Регулирует поклонение, семейные и гражданские отношения.",
+                    "corpus://islam/sharia",
+                    List.of("шариат", "ислам", "коран", "сунна", "иджма", "кийас")),
+            new Item(
                     "Ислам в религиоведении",
                     "На экзамене по религиоведению часто спрашивают пять столпов, отличие суннитов и шиитов, "
                             + "роль пророка и понятие уммы.",
@@ -72,6 +81,20 @@ final class PipelineCorpus {
                     List.of("экзамен", "религиоведение", "ислам", "столпов")));
 
     private PipelineCorpus() {
+    }
+
+    public static List<Map<String, Object>> searchPublic(String query) {
+        return search(query);
+    }
+
+    public static Optional<Map<String, Object>> itemByUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return Optional.empty();
+        }
+        return ENTRIES.stream()
+                .filter(entry -> url.equals(entry.url()))
+                .findFirst()
+                .map(PipelineCorpus::toItemMap);
     }
 
     static List<Map<String, Object>> search(String query) {

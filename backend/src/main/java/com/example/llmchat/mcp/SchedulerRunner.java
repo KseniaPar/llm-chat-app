@@ -63,12 +63,13 @@ public class SchedulerRunner {
             }
 
             if (SchedulerStore.TASK_PERIODIC_SUMMARY.equals(task.taskType())) {
-                Map<String, Object> summary = SchedulerStore.getSummary(jdbcTemplate, Instant.now().minusSeconds(3600));
+                Map<String, Object> compactSummary =
+                        SchedulerStore.getSummaryStats(jdbcTemplate, Instant.now().minusSeconds(3600));
                 Map<String, Object> result = new LinkedHashMap<>();
                 result.put("type", SchedulerStore.TASK_PERIODIC_SUMMARY);
                 result.put("label", task.message());
                 result.put("executedAt", Instant.now().toString());
-                result.put("summary", summary);
+                result.put("summary", compactSummary);
                 SchedulerStore.recordResult(jdbcTemplate, task.id(), objectMapper.writeValueAsString(result));
 
                 int interval = task.intervalMinutes() != null ? task.intervalMinutes() : 60;

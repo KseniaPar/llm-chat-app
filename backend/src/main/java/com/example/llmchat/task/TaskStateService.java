@@ -1,6 +1,7 @@
 package com.example.llmchat.task;
 
 import com.example.llmchat.dto.TaskStateSnapshot;
+import com.example.llmchat.mcp.McpOrchestrationPromptDetector;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -77,6 +78,9 @@ public class TaskStateService {
     }
 
     public boolean looksLikeStudyTaskStart(String userMessage) {
+        if (McpOrchestrationPromptDetector.isExamPrepOrchestration(userMessage)) {
+            return false;
+        }
         return userMessage != null && STUDY_TASK_START.matcher(userMessage.trim()).find();
     }
 

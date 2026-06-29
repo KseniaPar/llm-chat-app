@@ -1,5 +1,6 @@
 package com.example.llmchat.invariants;
 
+import com.example.llmchat.mcp.McpOrchestrationPromptDetector;
 import com.example.llmchat.personalization.UserProfile;
 import com.example.llmchat.task.PlanningSteps;
 import com.example.llmchat.task.TaskPhase;
@@ -121,6 +122,9 @@ public class InvariantGuard {
         }
         String message = context.userMessage();
         if (message == null || message.isBlank()) {
+            return false;
+        }
+        if (McpOrchestrationPromptDetector.isExamPrepOrchestration(message)) {
             return false;
         }
         Optional<TaskState> taskState = context.taskState();
