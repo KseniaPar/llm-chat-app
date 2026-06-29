@@ -205,7 +205,7 @@ public class McpPipelineService {
             }
         }
         String raw = builder.length() > 0 ? builder.toString() : "{}";
-        return McpTextEncoding.normalize(raw);
+        return McpTextEncoding.normalizeJson(raw);
     }
 
     private JsonNode parseJson(String rawText) {

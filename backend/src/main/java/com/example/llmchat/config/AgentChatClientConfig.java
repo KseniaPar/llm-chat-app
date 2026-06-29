@@ -1,5 +1,6 @@
 package com.example.llmchat.config;
 
+import com.example.llmchat.mcp.McpTextEncoding;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
@@ -23,8 +24,12 @@ public class AgentChatClientConfig {
     private static final Logger log = LoggerFactory.getLogger(AgentChatClientConfig.class);
 
     public static final String STUDY_SERVER_NAME = "mcp-study";
+    public static final String PIPELINE_SERVER_NAME = "mcp-pipeline";
     public static final String SCHEDULER_SERVER_NAME = "mcp-scheduler";
-    private static final Set<String> AGENT_MCP_SERVER_NAMES = Set.of(STUDY_SERVER_NAME, SCHEDULER_SERVER_NAME);
+    private static final Set<String> AGENT_MCP_SERVER_NAMES = Set.of(
+            STUDY_SERVER_NAME, PIPELINE_SERVER_NAME, SCHEDULER_SERVER_NAME);
+    private static final Set<String> AGENT_EXCLUDED_TOOL_NAMES = Set.of(
+            "schedulePeriodicSummary", "getSummary");
 
     private static final ThreadLocal<List<McpToolCallLogDtoHolder>> TOOL_CALLS =
             ThreadLocal.withInitial(CopyOnWriteArrayList::new);
@@ -63,6 +68,10 @@ public class AgentChatClientConfig {
             String serverName = resolveServerName(client);
             ToolCallback[] raw = new SyncMcpToolCallbackProvider(List.of(client)).getToolCallbacks();
             for (ToolCallback callback : raw) {
+                String toolName = callback.getToolDefinition().name();
+                if (AGENT_EXCLUDED_TOOL_NAMES.contains(toolName)) {
+                    continue;
+                }
                 wrapped.add(new RecordingToolCallback(callback, serverName));
             }
         }
@@ -133,6 +142,7 @@ public class AgentChatClientConfig {
             long started = System.currentTimeMillis();
             log.info("MCP tool call -> {}.{} args={}", serverName, getToolDefinition().name(), toolInput);
             String result = delegate.call(toolInput);
+            result = looksLikeJson(result) ? McpTextEncoding.normalizeJson(result) : McpTextEncoding.normalize(result);
             long duration = System.currentTimeMillis() - started;
             log.info("MCP tool result <- {}.{} ({} ms)", serverName, getToolDefinition().name(), duration);
             String preview = result != null && result.length() > 500
@@ -141,10 +151,18 @@ public class AgentChatClientConfig {
             TOOL_CALLS.get().add(new McpToolCallLogDtoHolder(
                     serverName,
                     getToolDefinition().name(),
-                    toolInput,
+                    McpTextEncoding.normalize(toolInput),
                     preview,
                     duration));
             return result;
+        }
+
+        private static boolean looksLikeJson(String value) {
+            if (value == null) {
+                return false;
+            }
+            String trimmed = value.trim();
+            return trimmed.startsWith("{") || trimmed.startsWith("[");
         }
     }
 }

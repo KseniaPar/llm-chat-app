@@ -9,12 +9,15 @@ import com.example.llmchat.dto.MemoryContextSnapshot;
 import com.example.llmchat.dto.TaskStateSnapshot;
 import com.example.llmchat.dto.TokenStats;
 import com.example.llmchat.dto.UserProfileSnapshot;
+import com.example.llmchat.dto.OrchestrationRunResponse;
 import com.example.llmchat.invariants.InvariantCheckResult;
 import com.example.llmchat.invariants.InvariantContext;
 import com.example.llmchat.invariants.InvariantGuard;
 import com.example.llmchat.invariants.InvariantsService;
 import com.example.llmchat.memory.ContextAssembler;
 import com.example.llmchat.memory.MemoryManager;
+import com.example.llmchat.mcp.McpOrchestrationPromptDetector;
+import com.example.llmchat.mcp.McpOrchestrationService;
 import com.example.llmchat.personalization.PersonalizationService;
 import com.example.llmchat.personalization.UserProfile;
 import com.example.llmchat.task.TaskState;
@@ -52,6 +55,7 @@ public class ChatAgent {
     private final InvariantGuard invariantGuard;
     private final InvariantsService invariantsService;
     private final PersonalizationService personalizationService;
+    private final McpOrchestrationService orchestrationService;
     private final double temperature;
     private final int maxTokens;
 
@@ -72,6 +76,7 @@ public class ChatAgent {
             InvariantGuard invariantGuard,
             InvariantsService invariantsService,
             PersonalizationService personalizationService,
+            McpOrchestrationService orchestrationService,
             @Value("${app.agent.temperature}") double temperature,
             @Value("${app.agent.max-tokens}") int maxTokens) {
         this.openRouterHttpClient = openRouterHttpClient;
@@ -90,6 +95,7 @@ public class ChatAgent {
         this.invariantGuard = invariantGuard;
         this.invariantsService = invariantsService;
         this.personalizationService = personalizationService;
+        this.orchestrationService = orchestrationService;
         this.temperature = temperature;
         this.maxTokens = maxTokens;
     }
@@ -112,77 +118,96 @@ public class ChatAgent {
         contextStrategyService.ensureStrategy(sessionId, strategy);
 
         String activeSessionId = sessionId;
+        boolean agentDrivenMcp = Boolean.TRUE.equals(request.agentDrivenMcp());
+
+        if (!agentDrivenMcp && McpOrchestrationPromptDetector.isExamPrepOrchestration(prompt)) {
+            return runOrchestrationTurn(userId, activeSessionId, prompt, strategy);
+        }
 
         taskStateService.promotePendingState(activeSessionId);
 
         List<String> taskStateLogs = new ArrayList<>();
-        TaskStateService.PauseResumeCommand command = taskStateService.detectCommand(prompt);
-        if (command == TaskStateService.PauseResumeCommand.PAUSE) {
-            if (taskStateService.getState(activeSessionId).isPresent()) {
-                appendTransitionLog(taskStateLogs, taskStateService.pause(activeSessionId));
-            } else {
-                taskStateLogs.add("TASK → пауза: задача ещё не начата");
-            }
-        } else if (command == TaskStateService.PauseResumeCommand.RESUME) {
-            if (taskStateService.getState(activeSessionId).isPresent()) {
-                appendTransitionLog(taskStateLogs, taskStateService.resume(activeSessionId));
-            } else {
-                taskStateLogs.add("TASK → продолжение: задача ещё не начата");
-            }
+        TaskStateService.PauseResumeCommand command = TaskStateService.PauseResumeCommand.NONE;
+        if (agentDrivenMcp) {
+            taskStateLogs.add("MCP → agent-driven: LLM выбирает tools (Day 20)");
+            taskStateLogs.add("TASK → пропущен — agent-driven MCP");
         }
 
-        taskStateService.bootstrapPlanningIfNeeded(activeSessionId, prompt)
-                .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → задача начата"));
+        if (!agentDrivenMcp) {
+            command = taskStateService.detectCommand(prompt);
+            if (command == TaskStateService.PauseResumeCommand.PAUSE) {
+                if (taskStateService.getState(activeSessionId).isPresent()) {
+                    appendTransitionLog(taskStateLogs, taskStateService.pause(activeSessionId));
+                } else {
+                    taskStateLogs.add("TASK → пауза: задача ещё не начата");
+                }
+            } else if (command == TaskStateService.PauseResumeCommand.RESUME) {
+                if (taskStateService.getState(activeSessionId).isPresent()) {
+                    appendTransitionLog(taskStateLogs, taskStateService.resume(activeSessionId));
+                } else {
+                    taskStateLogs.add("TASK → продолжение: задача ещё не начата");
+                }
+            }
 
-        int priorMessages = conversationStore.getStoredMessageCount(activeSessionId);
-        Optional<TransitionResult> skipAudit = taskTransitionService.auditUserSkipAttempt(activeSessionId, prompt);
-        skipAudit.ifPresent(result -> appendTransitionLog(taskStateLogs, result));
+            taskStateService.bootstrapPlanningIfNeeded(activeSessionId, prompt)
+                    .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → задача начата"));
 
-        if (skipAudit.isEmpty()) {
-            taskStateService.advancePlanningSubPhase(activeSessionId, prompt, priorMessages)
-                    .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → переход к согласованию плана"));
+            int priorMessages = conversationStore.getStoredMessageCount(activeSessionId);
+            Optional<TransitionResult> skipAudit = taskTransitionService.auditUserSkipAttempt(activeSessionId, prompt);
+            skipAudit.ifPresent(result -> appendTransitionLog(taskStateLogs, result));
 
-            taskStateService.confirmExecutionIfReady(activeSessionId, prompt)
-                    .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → переход к разбору тем"));
+            if (skipAudit.isEmpty()) {
+                taskStateService.advancePlanningSubPhase(activeSessionId, prompt, priorMessages)
+                        .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → переход к согласованию плана"));
 
-            taskStateService.startValidationIfReady(activeSessionId, prompt)
-                    .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → переход к самопроверке"));
+                taskStateService.confirmExecutionIfReady(activeSessionId, prompt)
+                        .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → переход к разбору тем"));
+
+                taskStateService.startValidationIfReady(activeSessionId, prompt)
+                        .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → переход к самопроверке"));
+            }
+
+            taskStateService.advanceValidationAfterMcqAnswer(activeSessionId, prompt)
+                    .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → следующий вопрос самопроверки"));
+
+            taskStateService.autoAdvanceToValidationIfReady(activeSessionId)
+                    .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → авто: самопроверка"));
+
+            taskStateService.autoAdvanceToDoneIfReady(activeSessionId)
+                    .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → авто: тема пройдена"));
         }
-
-        taskStateService.advanceValidationAfterMcqAnswer(activeSessionId, prompt)
-                .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → следующий вопрос самопроверки"));
-
-        taskStateService.autoAdvanceToValidationIfReady(activeSessionId)
-                .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → авто: самопроверка"));
-
-        taskStateService.autoAdvanceToDoneIfReady(activeSessionId)
-                .ifPresent(result -> appendTransitionLog(taskStateLogs, result, "TASK → авто: тема пройдена"));
 
         UserProfile profile = personalizationService.getProfile(userId);
-        Optional<TaskState> taskStateForGuard = taskStateService.getState(activeSessionId);
-        InvariantContext invariantContext = new InvariantContext(
-                userId,
-                activeSessionId,
-                prompt,
-                taskStateForGuard,
-                profile);
-        InvariantCheckResult invariantCheck = invariantGuard.check(invariantContext);
-
-        if (invariantCheck.hardBlock()) {
-            return buildInvariantRefusalResponse(
-                    sessionId,
+        InvariantCheckResult invariantCheck;
+        if (agentDrivenMcp) {
+            invariantCheck = new InvariantCheckResult(List.of(), List.of(), List.of());
+            taskStateLogs.add("INVARIANTS → пропущены — agent-driven MCP");
+        } else {
+            Optional<TaskState> taskStateForGuard = taskStateService.getState(activeSessionId);
+            InvariantContext invariantContext = new InvariantContext(
                     userId,
                     activeSessionId,
                     prompt,
-                    strategy,
-                    invariantContext,
-                    invariantCheck,
-                    taskStateLogs);
+                    taskStateForGuard,
+                    profile);
+            invariantCheck = invariantGuard.check(invariantContext);
+
+            if (invariantCheck.hardBlock()) {
+                return buildInvariantRefusalResponse(
+                        sessionId,
+                        userId,
+                        activeSessionId,
+                        prompt,
+                        strategy,
+                        invariantContext,
+                        invariantCheck,
+                        taskStateLogs);
+            }
         }
 
         ContextAssembler.AssembledContext assembled =
                 contextAssembler.assemble(
-                        userId, activeSessionId, prompt, strategy, useDay10Strategy, invariantCheck);
+                        userId, activeSessionId, prompt, strategy, useDay10Strategy, invariantCheck, agentDrivenMcp);
         List<OpenRouterHttpClient.ChatMessage> messages = assembled.messages();
         MemoryContextSnapshot memorySnapshot = assembled.memorySnapshot();
 
@@ -263,7 +288,7 @@ public class ChatAgent {
         conversationStore.append(activeSessionId, "assistant", answer);
         memoryLogs.add("SHORT → assistant: сохранено сообщение");
 
-        if (command == TaskStateService.PauseResumeCommand.NONE) {
+        if (!agentDrivenMcp && command == TaskStateService.PauseResumeCommand.NONE) {
             taskStateUpdaterService.updateFromTurn(
                     activeSessionId,
                     prompt,
@@ -370,6 +395,84 @@ public class ChatAgent {
         if (result.newState() != null) {
             logs.addAll(taskStateService.buildTaskStateLogs(result.newState(), result.accepted() && acceptedPrefix != null));
         }
+    }
+
+    private AgentResponse runOrchestrationTurn(
+            String userId,
+            String activeSessionId,
+            String prompt,
+            ContextStrategy strategy) {
+        OrchestrationRunResponse orchestration = orchestrationService.run(
+                McpOrchestrationPromptDetector.toExamPrepRequest(prompt));
+        String answer = orchestration.assistantMessage() != null && !orchestration.assistantMessage().isBlank()
+                ? orchestration.assistantMessage()
+                : "MCP-оркестрация выполнена: study → pipeline → scheduler.";
+
+        List<String> logs = new ArrayList<>();
+        logs.add("MCP → orchestration exam-prep (обход Task FSM)");
+        logs.add("MCP → шагов: " + orchestration.steps().size());
+        for (McpToolCallLogDto call : orchestration.mcpToolCalls()) {
+            logs.add("MCP tool: " + call.serverName() + "/" + call.toolName() + " (" + call.durationMs() + " ms)");
+        }
+
+        conversationStore.append(activeSessionId, "user", prompt);
+        conversationStore.append(activeSessionId, "assistant", answer);
+        contextStrategyService.afterUserMessage(activeSessionId, strategy, prompt);
+        contextStrategyService.afterAssistantMessage(activeSessionId, strategy);
+
+        MemoryContextSnapshot memorySnapshot = memoryManager.buildContextSnapshot(userId, activeSessionId, strategy);
+        UserProfile profile = personalizationService.getProfile(userId);
+        UserProfileSnapshot profileSnapshot = new UserProfileSnapshot(
+                profile.displayName(),
+                profile.responseStyle(),
+                profile.responseFormat(),
+                profile.constraints(),
+                personalizationService.formatProfileBlock(profile) != null);
+
+        int promptTokens = tokenCounter.estimateTextTokens(prompt);
+        int responseTokens = tokenCounter.estimateTextTokens(answer);
+        TokenStats tokenStats = new TokenStats(
+                promptTokens,
+                0,
+                promptTokens + responseTokens,
+                0,
+                responseTokens,
+                promptTokens + responseTokens,
+                0,
+                0,
+                0,
+                0.0,
+                0.0,
+                tokenCounter.contextWindow(),
+                tokenCounter.contextWindow(),
+                false,
+                false,
+                false,
+                false,
+                0,
+                0,
+                0,
+                null,
+                strategy.name(),
+                0,
+                0,
+                contextStrategyService.windowSize(),
+                conversationStore.getStoredMessageCount(activeSessionId));
+
+        return new AgentResponse(
+                answer,
+                activeSessionId,
+                List.copyOf(logs),
+                tokenStats,
+                memorySnapshot,
+                List.of("SHORT → user: сохранено сообщение", "SHORT → assistant: MCP orchestration"),
+                profileSnapshot,
+                List.of(),
+                new TaskStateSnapshot(null, null, null, null, null, false, false, false),
+                List.of("TASK: пропущен — MCP orchestration"),
+                new InvariantsSnapshot(0, List.of(), false, List.of()),
+                List.of("INVARIANTS: пропущены — MCP orchestration"),
+                List.copyOf(orchestration.mcpToolCalls()));
     }
 
     private AgentResponse buildInvariantRefusalResponse(

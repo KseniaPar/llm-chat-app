@@ -93,7 +93,7 @@ public class StrategyCompareService {
 
                 try {
                     AgentResponse response = chatAgent.run(new AgentRequest(
-                            prompt, sessionId, false, strategy.name(), null),
+                            prompt, sessionId, false, strategy.name(), null, null),
                             SystemUserBootstrap.SYSTEM_USER_ID);
                     sessionId = response.sessionId();
                     TokenStats stats = response.tokens();
@@ -175,7 +175,7 @@ public class StrategyCompareService {
 
                 try {
                     AgentResponse response = chatAgent.run(new AgentRequest(
-                            prompt, sessionId, false, ContextStrategy.BRANCHING.name(), null),
+                            prompt, sessionId, false, ContextStrategy.BRANCHING.name(), null, null),
                             SystemUserBootstrap.SYSTEM_USER_ID);
                     sessionId = response.sessionId();
                     steps.add(stepFromResponse(turn, response.tokens()));
@@ -215,7 +215,7 @@ public class StrategyCompareService {
 
                     try {
                         AgentResponse responseA = chatAgent.run(new AgentRequest(
-                                promptA, sessionId, false, ContextStrategy.BRANCHING.name(), branches.get(0).branchId()),
+                                promptA, sessionId, false, ContextStrategy.BRANCHING.name(), branches.get(0).branchId(), null),
                                 SystemUserBootstrap.SYSTEM_USER_ID);
 
                         steps.add(stepFromResponse(turn, responseA.tokens()));

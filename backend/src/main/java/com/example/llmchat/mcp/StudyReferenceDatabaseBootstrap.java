@@ -43,6 +43,8 @@ public class StudyReferenceDatabaseBootstrap {
 
             JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
             StudyTopicsSeed.ensureSeeded(jdbcTemplate);
+            StudyTopicsSeed.ensureSupplementalTopics(jdbcTemplate);
+            StudyTopicsSeed.patchTopicCorrections(jdbcTemplate);
 
             Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM study_topics", Integer.class);
             log.info("Study reference DB ready at {} — {} topics", path, count);
