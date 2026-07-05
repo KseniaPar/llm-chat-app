@@ -2531,3 +2531,131 @@ body {
 .transitions-panel__empty.hidden {
   display: none;
 }
+
+.rag-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.rag-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 0.85rem;
+}
+
+.rag-panel__badge {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #0ea5e920;
+  color: #0369a1;
+}
+
+.rag-panel__section {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rag-panel__section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.rag-panel__subtitle {
+  margin: 0 0 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.rag-panel__hint {
+  margin: 0 0 8px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.rag-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.rag-panel__btn {
+  font-size: 0.68rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+}
+
+.rag-panel__btn--primary {
+  background: #0ea5e9;
+  color: #fff;
+  border-color: #0ea5e9;
+}
+
+.rag-panel__label {
+  display: block;
+  font-size: 0.68rem;
+  margin-bottom: 6px;
+}
+
+.rag-panel__input {
+  width: 100%;
+  margin-top: 2px;
+  padding: 4px 6px;
+  font-size: 0.72rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.rag-panel__check {
+  display: block;
+  font-size: 0.68rem;
+  margin-bottom: 6px;
+}
+
+.rag-panel__pre {
+  font-size: 0.62rem;
+  max-height: 160px;
+  overflow: auto;
+  background: #0f172a08;
+  padding: 6px;
+  border-radius: 6px;
+  white-space: pre-wrap;
+}
+
+.rag-panel__pre.hidden {
+  display: none;
+}
+
+.rag-panel__memory {
+  margin: 0;
+  font-size: 0.68rem;
+}
+
+.rag-panel__memory dt {
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.rag-panel__memory dd {
+  margin: 0;
+}
+
+.message-rag-sources {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+

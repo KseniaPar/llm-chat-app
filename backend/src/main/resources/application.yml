@@ -234,6 +234,14 @@ app:
     pricing:
       prompt-per-million: 0.15
       completion-per-million: 0.60
+  rag:
+    corpus-dir: data/rag-corpus
+    index-db: data/rag-index.db
+    embedding-model: openai/text-embedding-3-small
+    embedding-batch-size: 64
+    default-top-k: 5
+    fixed-chunk-size: 1200
+    chunk-overlap: 200
   token-demo:
     overflow-turns: 5
     overflow-prompt: prompts/Аристотель . Метафизика.txt

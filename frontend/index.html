@@ -3,294 +3,69 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 20 — MCP Orchestration</title>
+  <title>День 21 — RAG Index Demo</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/rag.css">
 </head>
 <body>
-  <div id="auth-overlay" class="auth-overlay">
-    <section class="auth-card">
-      <h2 class="auth-card__title">Вход в платформу</h2>
-      <p class="auth-card__desc">День 20 — оркестрация MCP: study + pipeline + scheduler</p>
-      <div class="auth-card__tabs">
-        <button id="auth-tab-login" class="auth-card__tab auth-card__tab--active" type="button">Вход</button>
-        <button id="auth-tab-register" class="auth-card__tab" type="button">Регистрация</button>
-      </div>
-      <form id="auth-form" class="auth-card__form">
-        <label class="auth-card__label">
-          Имя пользователя
-          <input id="auth-username" class="auth-card__input" type="text" autocomplete="username" required>
-        </label>
-        <label class="auth-card__label">
-          Пароль
-          <input id="auth-password" class="auth-card__input" type="password" autocomplete="current-password" required>
-        </label>
-        <p id="auth-error" class="auth-card__error hidden" role="alert"></p>
-        <button id="auth-submit" class="auth-card__submit" type="submit">Войти</button>
-      </form>
+  <main class="rag-app">
+    <header class="rag-app__header">
+      <p class="rag-app__badge">Day 21</p>
+      <h1 class="rag-app__title">Индексация документов для RAG</h1>
+      <p id="rag-day-label" class="rag-app__desc">Загрузка…</p>
+    </header>
+
+    <section class="demo-card">
+      <h2 class="demo-card__title">Корпус</h2>
+      <dl id="rag-corpus" class="demo-dl"></dl>
     </section>
-  </div>
 
-  <main class="app hidden" id="app-main">
-    <div class="app__top">
-      <section class="chat-shell">
-        <header class="chat-header">
-          <div class="chat-header__top">
-            <div class="chat-header__avatar" aria-hidden="true">AI</div>
-            <div class="chat-header__info">
-              <h1>Агент</h1>
-              <p>День 20 — MCP Orchestration: study → pipeline → scheduler</p>
-            </div>
-            <span id="auth-user-label" class="chat-header__user"></span>
-            <span id="loading" class="chat-header__status hidden" aria-live="polite">
-              <span class="typing-dots"><span></span><span></span><span></span></span>
-              печатает
-            </span>
-            <button id="new-dialog-btn" class="chat-header__action" type="button" title="Очистить чат и начать заново">Новый диалог</button>
-            <button id="logout-btn" class="chat-header__action" type="button" title="Выйти">Выйти</button>
-          </div>
-        </header>
+    <section class="demo-card">
+      <h2 class="demo-card__title">Технологии</h2>
+      <ul id="rag-tech" class="demo-list"></ul>
+    </section>
 
-        <div id="messages" class="messages" aria-live="polite">
-          <div class="messages-empty" id="demo-panel">
-            <div class="demo-panel">
-              <div class="demo-panel__header">
-                <span class="demo-panel__badge">Day 20</span>
-                <h2 class="demo-panel__title">Агент выбирает MCP</h2>
-                <p class="demo-panel__desc">
-                  LLM сам решает, какой tool на каком сервере вызвать.
-                  Слева появятся <strong>реальные шаги</strong> с serverName, args и ответом MCP.
-                </p>
-              </div>
-              <div class="demo-panel__flow" aria-hidden="true">
-                <div class="demo-panel__flow-step">💬 ваш запрос</div>
-                <div class="demo-panel__flow-arrow">↓</div>
-                <div class="demo-panel__flow-step">🤖 LLM + tool loop (study / pipeline / scheduler)</div>
-                <div class="demo-panel__flow-arrow">↓</div>
-                <div class="demo-panel__flow-step demo-panel__flow-step--answer">📋 шаги слева · ответ в чате</div>
-              </div>
-              <button type="button" id="demo-run-agent" class="demo-panel__run">Написать запрос</button>
-              <p class="demo-panel__hint">Сформулируйте задачу своими словами — агент сам выберет MCP tools</p>
-            </div>
-          </div>
-        </div>
+    <section class="demo-card">
+      <h2 class="demo-card__title">Пайплайн индексации</h2>
+      <ol id="rag-pipeline" class="demo-steps"></ol>
+    </section>
 
-        <div id="error" class="error hidden" role="alert"></div>
+    <section class="demo-card demo-card--actions">
+      <h2 class="demo-card__title">Запуск индексации</h2>
+      <p class="demo-card__note">Compare проиндексирует PDF обеими стратегиями и сохранит результат в SQLite.</p>
+      <div class="rag-panel__actions">
+        <button id="rag-compare-chunking" class="rag-panel__btn rag-panel__btn--primary" type="button">Compare chunking</button>
+        <button id="rag-index-fixed" class="rag-panel__btn" type="button">Только FIXED</button>
+        <button id="rag-index-structure" class="rag-panel__btn" type="button">Только STRUCTURE</button>
+        <button id="rag-refresh-demo" class="rag-panel__btn" type="button">Обновить данные</button>
+      </div>
+      <p id="rag-action-status" class="demo-status" aria-live="polite"></p>
+    </section>
 
-        <footer class="composer">
-          <textarea
-            id="prompt"
-            class="composer__input"
-            rows="1"
-            placeholder="Спросите про тему или попросите сохранить конспект в файл…"
-          ></textarea>
-          <button id="send-btn" class="composer__send" type="button" aria-label="Отправить">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M22 2 11 13"></path>
-              <path d="M22 2 15 22 11 13 2 9 22 2"></path>
-            </svg>
-          </button>
-        </footer>
-      </section>
+    <section class="demo-card">
+      <h2 class="demo-card__title">Сравнение стратегий chunking</h2>
+      <p class="demo-card__note">Данные из SQLite (<code>rag-index.db</code>, таблицы <code>rag_chunks</code> + <code>rag_index_runs</code>)</p>
+      <div class="compare-table-wrap">
+        <table id="rag-compare-table" class="compare-table">
+          <thead>
+            <tr>
+              <th>Метрика</th>
+              <th>FIXED_SIZE</th>
+              <th>STRUCTURE</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
 
-      <aside id="stats-panel" class="stats-panel hidden" aria-live="polite">
-        <h2 class="stats-panel__title">Статистика</h2>
-        <div class="token-panel__grid token-panel__grid--sidebar">
-          <div class="token-stat">
-            <span class="token-stat__label">Текущий запрос</span>
-            <span id="token-current" class="token-stat__value">—</span>
-          </div>
-          <div class="token-stat">
-            <span class="token-stat__label">История</span>
-            <span id="token-history" class="token-stat__value">—</span>
-          </div>
-          <div class="token-stat">
-            <span class="token-stat__label">Ответ модели</span>
-            <span id="token-response" class="token-stat__value">—</span>
-          </div>
-          <div class="token-stat">
-            <span class="token-stat__label">Сессия</span>
-            <span id="token-session" class="token-stat__value">—</span>
-          </div>
-          <div class="token-stat token-stat--wide">
-            <span class="token-stat__label">Стоимость сессии</span>
-            <span id="token-cost" class="token-stat__value">—</span>
-          </div>
-          <div class="token-stat token-stat--wide">
-            <span class="token-stat__label">Окно контекста</span>
-            <span id="token-context" class="token-stat__value">—</span>
-          </div>
-        </div>
-        <div id="token-bar" class="token-bar hidden">
-          <div id="token-bar-fill" class="token-bar__fill"></div>
-        </div>
-        <p id="token-warning" class="token-panel__warning hidden"></p>
-        <div id="profile-panel" class="profile-panel">
-          <h3 class="profile-panel__title">Профиль</h3>
-          <form id="profile-form" class="profile-panel__form">
-            <label class="profile-panel__label">
-              Имя
-              <input id="profile-display-name" class="profile-panel__input" type="text" placeholder="Марина">
-            </label>
-            <label class="profile-panel__label">
-              Стиль ответов
-              <select id="profile-response-style" class="profile-panel__input">
-                <option value="">— не задан —</option>
-                <option value="кратко, без воды">Кратко, без воды</option>
-                <option value="подробно с примерами">Подробно с примерами</option>
-                <option value="как преподаватель">Как преподаватель</option>
-              </select>
-            </label>
-            <label class="profile-panel__label">
-              Формат
-              <select id="profile-response-format" class="profile-panel__input">
-                <option value="">— не задан —</option>
-                <option value="нумерованные списки">Нумерованные списки</option>
-                <option value="абзацы">Абзацы</option>
-                <option value="конспект">Конспект</option>
-              </select>
-            </label>
-            <label class="profile-panel__label">
-              Ограничения
-              <textarea id="profile-constraints" class="profile-panel__textarea" rows="2" placeholder="Не использовать английские термины без перевода"></textarea>
-            </label>
-            <button id="profile-save-btn" class="profile-panel__save" type="submit">Сохранить</button>
-          </form>
-          <div id="profile-active-summary" class="profile-panel__summary hidden"></div>
-          <p id="profile-status" class="profile-panel__status hidden" role="status"></p>
-        </div>
-        <div id="task-panel" class="task-panel">
-          <h3 class="task-panel__title">Состояние задачи</h3>
-          <div id="task-panel-empty" class="task-panel__empty">Задача не начата — опишите цель подготовки в чате</div>
-          <div id="task-panel-content" class="task-panel__content hidden">
-            <div id="task-phase-badge" class="task-panel__phase"></div>
-            <p id="task-title" class="task-panel__task-title"></p>
-            <dl class="task-panel__details">
-              <div><dt>Текущий шаг</dt><dd id="task-current-step">—</dd></div>
-              <div><dt>Ожидаемое действие</dt><dd id="task-expected-action">—</dd></div>
-            </dl>
-            <p id="task-paused-label" class="task-panel__paused hidden">На паузе</p>
-            <div class="task-panel__actions">
-              <button id="task-pause-btn" class="task-panel__btn" type="button">Пауза</button>
-              <button id="task-resume-btn" class="task-panel__btn task-panel__btn--primary hidden" type="button">Продолжить</button>
-            </div>
-          </div>
-        </div>
-        <div id="scheduler-panel" class="scheduler-panel hidden">
-          <h3 class="scheduler-panel__title">
-            Уведомления
-            <span id="scheduler-badge" class="scheduler-panel__badge">—</span>
-          </h3>
-          <p class="scheduler-panel__hint">Напоминания · опрос каждые 5 с</p>
-          <ul id="scheduler-tasks-list" class="scheduler-panel__list"></ul>
-          <p id="scheduler-tasks-empty" class="scheduler-panel__empty">Нет активных задач</p>
-          <h4 class="scheduler-panel__subtitle">Последняя сводка</h4>
-          <div id="scheduler-summary" class="scheduler-panel__summary">Загрузка…</div>
-        </div>
-        <div id="transitions-panel" class="transitions-panel">
-          <h3 class="transitions-panel__title">
-            Переходы состояния
-            <span id="transitions-allowed-badge" class="transitions-panel__badge">—</span>
-          </h3>
-          <div id="transitions-allowed" class="transitions-panel__allowed"></div>
-          <ul id="transitions-list" class="transitions-panel__list"></ul>
-          <p id="transitions-empty" class="transitions-panel__empty">История переходов пуста</p>
-        </div>
-        <div id="invariants-panel" class="invariants-panel">
-          <h3 class="invariants-panel__title">
-            Бизнес-правила
-            <span id="invariants-count-badge" class="invariants-panel__badge">14</span>
-          </h3>
-          <ul id="invariants-list" class="invariants-panel__list"></ul>
-        </div>
-        <div id="orchestration-panel" class="orchestration-panel hidden">
-          <h3 class="orchestration-panel__title">
-            Agent MCP · шаги
-            <span id="orchestration-badge" class="orchestration-panel__badge">—</span>
-          </h3>
-          <p class="orchestration-panel__hint">Реальные tool calls · порядок выбирает LLM</p>
-          <p id="orchestration-servers" class="orchestration-panel__hint hidden"></p>
-          <ol id="orchestration-steps-list" class="orchestration-panel__steps"></ol>
-          <p id="orchestration-empty" class="orchestration-panel__empty">Нажмите «Запустить agent MCP» в чате</p>
-          <p id="orchestration-file" class="orchestration-panel__file hidden"></p>
-        </div>
-        <details id="pipeline-panel" class="pipeline-panel pipeline-panel--nested hidden" hidden>
-          <summary class="pipeline-panel__title">
-            Pipeline Runs (Day 19)
-            <span id="pipeline-badge" class="pipeline-panel__badge">—</span>
-          </summary>
-          <p class="pipeline-panel__hint">MCP tools ×3 · затем LLM объясняет результат</p>
-          <ol id="pipeline-steps-list" class="pipeline-panel__steps"></ol>
-          <p id="pipeline-empty" class="pipeline-panel__empty">Нажмите «Запустить пайплайн»</p>
-          <p id="pipeline-file" class="pipeline-panel__file hidden"></p>
-        </details>
-        <div id="mcp-panel" class="mcp-panel">
-          <h3 class="mcp-panel__title">
-            MCP Tools
-            <span id="mcp-status-badge" class="mcp-panel__badge mcp-panel__badge--offline">—</span>
-          </h3>
-          <p id="mcp-status-message" class="mcp-panel__message">Загрузка статуса MCP…</p>
-          <p id="mcp-sandbox-path" class="mcp-panel__sandbox hidden"></p>
-          <div id="mcp-orchestration-highlight" class="mcp-panel__study-highlight hidden">
-            <span class="mcp-panel__study-label">Day 20 — оркестрация</span>
-            <code class="mcp-panel__study-tool">searchTopic</code>
-            <code class="mcp-panel__study-tool">search</code>
-            <code class="mcp-panel__study-tool">scheduleReminder</code>
-          </div>
-          <div id="mcp-pipeline-highlight" class="mcp-panel__study-highlight hidden">
-            <span class="mcp-panel__study-label">Day 19 — пайплайн</span>
-            <code class="mcp-panel__study-tool">search</code>
-            <code class="mcp-panel__study-tool">summarize</code>
-            <code class="mcp-panel__study-tool">saveToFile</code>
-          </div>
-          <div id="mcp-scheduler-highlight" class="mcp-panel__study-highlight hidden">
-            <span class="mcp-panel__study-label">Day 18 — агент вызывает</span>
-            <code class="mcp-panel__study-tool">scheduleReminder</code>
-            <code class="mcp-panel__study-tool">getSummary</code>
-          </div>
-          <div id="mcp-study-highlight" class="mcp-panel__study-highlight hidden">
-            <span class="mcp-panel__study-label">Day 17 — справочник</span>
-            <code class="mcp-panel__study-tool">searchTopic</code>
-            <code class="mcp-panel__study-tool">getExamOutline</code>
-          </div>
-          <div class="mcp-panel__actions">
-            <button id="mcp-refresh-btn" class="mcp-panel__btn" type="button">Обновить</button>
-          </div>
-          <div id="mcp-pipeline-tools-wrap" class="mcp-panel__group hidden">
-            <h4 class="mcp-panel__group-title">🔗 mcp-pipeline</h4>
-            <ul id="mcp-pipeline-tools-list" class="mcp-panel__list"></ul>
-          </div>
-          <div id="mcp-scheduler-tools-wrap" class="mcp-panel__group hidden">
-            <h4 class="mcp-panel__group-title">⏱ mcp-scheduler</h4>
-            <ul id="mcp-scheduler-tools-list" class="mcp-panel__list"></ul>
-          </div>
-          <div id="mcp-study-tools-wrap" class="mcp-panel__group hidden">
-            <h4 class="mcp-panel__group-title">📚 mcp-study</h4>
-            <ul id="mcp-study-tools-list" class="mcp-panel__list"></ul>
-          </div>
-          <details id="mcp-fs-tools-wrap" class="mcp-panel__group mcp-panel__group--collapsed hidden">
-            <summary class="mcp-panel__group-title">📁 filesystem <span id="mcp-fs-count" class="mcp-panel__group-count"></span></summary>
-            <ul id="mcp-fs-tools-list" class="mcp-panel__list"></ul>
-          </details>
-          <ul id="mcp-tools-list" class="mcp-panel__list hidden"></ul>
-          <p id="mcp-tools-empty" class="mcp-panel__empty hidden">Инструменты не загружены</p>
-        </div>
-        <div id="memory-panel" class="memory-panel">
-          <h3 class="memory-panel__title">Память агента</h3>
-          <div class="memory-panel__tabs" role="tablist">
-            <button type="button" class="memory-panel__tab memory-panel__tab--active" data-memory-tab="short">Краткосрочная</button>
-            <button type="button" class="memory-panel__tab" data-memory-tab="working">Рабочая</button>
-            <button type="button" class="memory-panel__tab" data-memory-tab="long">Долговременная</button>
-          </div>
-          <div id="memory-tab-short" class="memory-panel__content"></div>
-          <div id="memory-tab-working" class="memory-panel__content hidden"></div>
-          <div id="memory-tab-long" class="memory-panel__content hidden"></div>
-          <div id="memory-logs" class="memory-panel__logs"></div>
-        </div>
-      </aside>
-    </div>
+    <section class="demo-card">
+      <h2 class="demo-card__title">Примеры чанков из SQLite</h2>
+      <p class="demo-card__note">По 5 чанков на стратегию: <strong>1 в начале</strong>, <strong>3 в середине</strong>, <strong>1 в конце</strong></p>
+      <div id="rag-samples" class="samples-grid"></div>
+    </section>
   </main>
 
   <script type="module" src="/js/app.js"></script>
