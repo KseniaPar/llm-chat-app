@@ -44,7 +44,7 @@ public class RagDemoService {
         String corpusFile = docs.isEmpty() ? "—" : docs.get(0).title();
 
         return new RagDemoResponse(
-                "День 21 — индексация документов",
+                "День 22 — первый RAG-запрос и сравнение с/без RAG",
                 corpusFile,
                 corpus.documentCount(),
                 corpus.estimatedPages(),

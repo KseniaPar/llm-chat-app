@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 21 — RAG Index Demo</title>
+  <title>День 22 — RAG Query Demo</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -12,12 +12,54 @@
 <body>
   <main class="rag-app">
     <header class="rag-app__header">
-      <p class="rag-app__badge">Day 21</p>
-      <h1 class="rag-app__title">Индексация документов для RAG</h1>
-      <p id="rag-day-label" class="rag-app__desc">Загрузка…</p>
+      <p class="rag-app__badge">Day 22</p>
+      <h1 class="rag-app__title">Первый RAG-запрос</h1>
+      <p id="rag-day-label" class="rag-app__desc">Вопрос → поиск чанков → LLM · сравнение с/без RAG</p>
     </header>
 
+    <section class="demo-card demo-card--actions">
+      <h2 class="demo-card__title">1. Сравнение одного вопроса</h2>
+      <p class="demo-card__note">Один и тот же вопрос: ответ модели <strong>без RAG</strong> и <strong>с RAG</strong> (STRUCTURE, top-5).</p>
+      <label class="rag-panel__label">
+        Вопрос
+        <input id="rag-question" class="rag-panel__input" type="text" placeholder="Что такое таинства Православной Церкви?">
+      </label>
+      <div class="rag-panel__actions">
+        <button id="rag-query-compare-btn" class="rag-panel__btn rag-panel__btn--primary" type="button">Сравнить с/без RAG</button>
+      </div>
+      <div id="rag-query-compare" class="query-compare hidden"></div>
+    </section>
+
     <section class="demo-card">
+      <h2 class="demo-card__title">2. Контрольные вопросы (10)</h2>
+      <p class="demo-card__note">По программе вступительного испытания «Основы христианства». Для каждого — ожидание и источники.</p>
+      <div class="rag-panel__actions">
+        <button id="rag-eval-run-btn" class="rag-panel__btn rag-panel__btn--primary" type="button">Запустить eval (10×2)</button>
+        <button id="rag-eval-load-btn" class="rag-panel__btn" type="button">Показать вопросы</button>
+      </div>
+      <p id="rag-eval-status" class="demo-status" aria-live="polite"></p>
+      <div class="compare-table-wrap">
+        <table id="rag-eval-questions" class="compare-table eval-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Раздел</th>
+              <th>Вопрос</th>
+              <th>Ожидание</th>
+              <th>Источники</th>
+              <th>Без RAG</th>
+              <th>С RAG</th>
+            </tr>
+          </thead>
+          <tbody id="rag-eval-body">
+            <tr><td colspan="7" class="eval-table__empty">Нажмите «Показать вопросы»</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="demo-card">
+      <h2 class="demo-card__title">Day 21 · Индексация</h2>
       <h2 class="demo-card__title">Корпус</h2>
       <dl id="rag-corpus" class="demo-dl"></dl>
     </section>

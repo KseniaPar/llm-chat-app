@@ -271,6 +271,102 @@ code {
   line-height: 1.4;
 }
 
+.rag-panel__label {
+  display: block;
+  font-size: 0.875rem;
+  margin-bottom: 10px;
+}
+
+.rag-panel__input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 0.95rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.query-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.query-compare.hidden {
+  display: none;
+}
+
+.query-compare__col {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fafbfc;
+}
+
+.query-compare__col--rag {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.query-compare__col--plain {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.query-compare__title {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.query-compare__text {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.query-compare__chunks {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.eval-table th,
+.eval-table td {
+  font-size: 0.78rem;
+  vertical-align: top;
+}
+
+.eval-table__empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 16px;
+}
+
+.eval-table__answer {
+  max-width: 220px;
+  line-height: 1.4;
+}
+
+.eval-table__matched {
+  color: #047857;
+  font-size: 0.72rem;
+}
+
+@media (max-width: 720px) {
+  .query-compare {
+    grid-template-columns: 1fr;
+  }
+}
+
 .sample-col__title {
   margin: 0 0 10px;
   padding: 6px 10px;

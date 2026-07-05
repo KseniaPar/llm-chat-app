@@ -2,6 +2,7 @@ package com.example.llmchat.rag;
 
 import com.example.llmchat.agent.CompletionResult;
 import com.example.llmchat.agent.OpenRouterHttpClient;
+import com.example.llmchat.dto.RagQueryCompareResponse;
 import com.example.llmchat.dto.RagQueryResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -65,6 +66,12 @@ public class RagQueryService {
                 .toList();
 
         return new RagQueryResponse(completion.content(), used, "WITH_RAG");
+    }
+
+    public RagQueryCompareResponse compare(String question, ChunkingStrategy strategy, Integer topK) {
+        RagQueryResponse withoutRag = query(question, false, strategy, topK);
+        RagQueryResponse withRag = query(question, true, strategy, topK);
+        return new RagQueryCompareResponse(question, withoutRag, withRag);
     }
 
     private String completeWithoutRag(String question) {
