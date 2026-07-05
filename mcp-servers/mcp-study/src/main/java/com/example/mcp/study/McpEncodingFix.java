@@ -5,6 +5,8 @@ import java.nio.charset.StandardCharsets;
 
 final class McpEncodingFix {
 
+    private static final Charset CP1251 = Charset.forName("Windows-1251");
+
     private McpEncodingFix() {
     }
 
@@ -15,23 +17,62 @@ final class McpEncodingFix {
         if (!looksLikeMojibake(value)) {
             return value;
         }
-        String fixed = tryFix(value, StandardCharsets.ISO_8859_1);
-        if (fixed != null && containsCyrillic(fixed)) {
-            return fixed;
+        String best = value;
+        int bestScore = cyrillicLetterScore(value);
+        for (Charset charset : new Charset[] {CP1251, StandardCharsets.ISO_8859_1, Charset.forName("Windows-1252")}) {
+            String candidate = tryFix(value, charset);
+            if (candidate == null) {
+                continue;
+            }
+            int score = cyrillicLetterScore(candidate);
+            if (score > bestScore && !looksLikeMojibake(candidate)) {
+                best = candidate;
+                bestScore = score;
+            }
         }
-        fixed = tryFix(value, Charset.forName("Windows-1252"));
-        if (fixed != null && containsCyrillic(fixed)) {
-            return fixed;
+        return best;
+    }
+
+    static String fixTransliteration(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
         }
-        return value;
+        return value
+                .replace("кiyas", "кийас")
+                .replace("kiyas", "кийас")
+                .replace("Kiyas", "кийас")
+                .replace("Кiyas", "кийас");
+    }
+
+    static String normalizeFull(String value) {
+        return fixTransliteration(normalize(value));
     }
 
     private static boolean looksLikeMojibake(String value) {
-        return value.indexOf('Р') >= 0 || value.indexOf('С') >= 0 || value.indexOf('Ð') >= 0;
+        if (value.indexOf('Ð') >= 0 || value.indexOf('Ñ') >= 0) {
+            return true;
+        }
+        int uppercaseMarkers = 0;
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (ch == 'Р' || ch == 'С') {
+                uppercaseMarkers++;
+            }
+        }
+        if (uppercaseMarkers >= 2) {
+            return true;
+        }
+        return value.indexOf('\uFFFD') >= 0 && uppercaseMarkers >= 1;
     }
 
-    private static boolean containsCyrillic(String value) {
-        return value.chars().anyMatch(ch -> Character.UnicodeBlock.of(ch) == Character.UnicodeBlock.CYRILLIC);
+    private static int cyrillicLetterScore(String value) {
+        int score = 0;
+        for (int i = 0; i < value.length(); i++) {
+            if (Character.UnicodeBlock.of(value.charAt(i)) == Character.UnicodeBlock.CYRILLIC) {
+                score++;
+            }
+        }
+        return score;
     }
 
     private static String tryFix(String value, Charset sourceCharset) {

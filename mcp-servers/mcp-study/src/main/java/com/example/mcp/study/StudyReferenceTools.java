@@ -144,10 +144,10 @@ public class StudyReferenceTools {
 
     private Map<String, Object> rowMap(java.sql.ResultSet rs) throws java.sql.SQLException {
         Map<String, Object> row = new LinkedHashMap<>();
-        row.put("subject", rs.getString("subject"));
-        row.put("topic", rs.getString("topic"));
-        row.put("summary", rs.getString("summary"));
-        row.put("examHints", rs.getString("examHints"));
+        row.put("subject", McpEncodingFix.normalizeFull(rs.getString("subject")));
+        row.put("topic", McpEncodingFix.normalizeFull(rs.getString("topic")));
+        row.put("summary", McpEncodingFix.normalizeFull(rs.getString("summary")));
+        row.put("examHints", McpEncodingFix.normalizeFull(rs.getString("examHints")));
         return row;
     }
 }

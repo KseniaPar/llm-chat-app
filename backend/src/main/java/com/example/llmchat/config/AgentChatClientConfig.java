@@ -1,5 +1,6 @@
 package com.example.llmchat.config;
 
+import com.example.llmchat.mcp.McpTextEncoding;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
@@ -14,6 +15,7 @@ import org.springframework.context.annotation.Lazy;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 @Configuration
@@ -22,12 +24,19 @@ public class AgentChatClientConfig {
     private static final Logger log = LoggerFactory.getLogger(AgentChatClientConfig.class);
 
     public static final String STUDY_SERVER_NAME = "mcp-study";
+    public static final String PIPELINE_SERVER_NAME = "mcp-pipeline";
+    public static final String SCHEDULER_SERVER_NAME = "mcp-scheduler";
+    private static final Set<String> AGENT_MCP_SERVER_NAMES = Set.of(
+            STUDY_SERVER_NAME, PIPELINE_SERVER_NAME, SCHEDULER_SERVER_NAME);
+    private static final Set<String> AGENT_EXCLUDED_TOOL_NAMES = Set.of(
+            "schedulePeriodicSummary", "getSummary");
+
     private static final ThreadLocal<List<McpToolCallLogDtoHolder>> TOOL_CALLS =
             ThreadLocal.withInitial(CopyOnWriteArrayList::new);
 
     @Bean
     @Lazy
-    ToolCallback[] studyToolCallbacks(ObjectProvider<List<McpSyncClient>> mcpClientsProvider) {
+    ToolCallback[] agentToolCallbacks(ObjectProvider<List<McpSyncClient>> mcpClientsProvider) {
         List<McpSyncClient> clients = mcpClientsProvider.getIfAvailable();
         if (clients == null || clients.isEmpty()) {
             return new ToolCallback[0];
@@ -41,42 +50,56 @@ public class AgentChatClientConfig {
             }
         }
 
-        List<McpSyncClient> studyClients = clients.stream()
-                .filter(this::isStudyServer)
+        List<McpSyncClient> agentClients = clients.stream()
+                .filter(this::isAgentMcpServer)
                 .toList();
 
-        if (studyClients.isEmpty()) {
-            log.warn("MCP study server not found — ChatClient will run without study tools");
+        if (agentClients.isEmpty()) {
+            log.warn("No MCP agent servers found — ChatClient will run without study/scheduler tools");
             return new ToolCallback[0];
         }
 
-        log.info("ChatClient wired to MCP study server ({} client(s))", studyClients.size());
+        log.info(
+                "ChatClient wired to MCP agent servers: {}",
+                agentClients.stream().map(this::resolveServerName).toList());
 
-        ToolCallback[] raw = new SyncMcpToolCallbackProvider(studyClients).getToolCallbacks();
         List<ToolCallback> wrapped = new ArrayList<>();
-        for (ToolCallback callback : raw) {
-            wrapped.add(new RecordingToolCallback(callback, STUDY_SERVER_NAME));
+        for (McpSyncClient client : agentClients) {
+            String serverName = resolveServerName(client);
+            ToolCallback[] raw = new SyncMcpToolCallbackProvider(List.of(client)).getToolCallbacks();
+            for (ToolCallback callback : raw) {
+                String toolName = callback.getToolDefinition().name();
+                if (AGENT_EXCLUDED_TOOL_NAMES.contains(toolName)) {
+                    continue;
+                }
+                wrapped.add(new RecordingToolCallback(callback, serverName));
+            }
         }
         return wrapped.toArray(ToolCallback[]::new);
     }
 
     @Bean
     @Lazy
-    ChatClient agentChatClient(ChatClient.Builder chatClientBuilder, ToolCallback[] studyToolCallbacks) {
-        if (studyToolCallbacks.length == 0) {
+    ChatClient agentChatClient(ChatClient.Builder chatClientBuilder, ToolCallback[] agentToolCallbacks) {
+        if (agentToolCallbacks.length == 0) {
             return chatClientBuilder.build();
         }
         return chatClientBuilder
-                .defaultToolCallbacks(studyToolCallbacks)
+                .defaultToolCallbacks(agentToolCallbacks)
                 .build();
     }
 
-    private boolean isStudyServer(McpSyncClient client) {
+    private boolean isAgentMcpServer(McpSyncClient client) {
+        String name = resolveServerName(client);
+        return name != null && AGENT_MCP_SERVER_NAMES.contains(name);
+    }
+
+    private String resolveServerName(McpSyncClient client) {
         try {
-            var info = client.getServerInfo();
-            return info != null && STUDY_SERVER_NAME.equalsIgnoreCase(info.name());
+            McpSchema.Implementation info = client.getServerInfo();
+            return info != null ? info.name() : null;
         } catch (Exception exception) {
-            return false;
+            return null;
         }
     }
 
@@ -119,6 +142,7 @@ public class AgentChatClientConfig {
             long started = System.currentTimeMillis();
             log.info("MCP tool call -> {}.{} args={}", serverName, getToolDefinition().name(), toolInput);
             String result = delegate.call(toolInput);
+            result = looksLikeJson(result) ? McpTextEncoding.normalizeJson(result) : McpTextEncoding.normalize(result);
             long duration = System.currentTimeMillis() - started;
             log.info("MCP tool result <- {}.{} ({} ms)", serverName, getToolDefinition().name(), duration);
             String preview = result != null && result.length() > 500
@@ -127,10 +151,18 @@ public class AgentChatClientConfig {
             TOOL_CALLS.get().add(new McpToolCallLogDtoHolder(
                     serverName,
                     getToolDefinition().name(),
-                    toolInput,
+                    McpTextEncoding.normalize(toolInput),
                     preview,
                     duration));
             return result;
+        }
+
+        private static boolean looksLikeJson(String value) {
+            if (value == null) {
+                return false;
+            }
+            String trimmed = value.trim();
+            return trimmed.startsWith("{") || trimmed.startsWith("[");
         }
     }
 }

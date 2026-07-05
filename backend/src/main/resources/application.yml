@@ -32,6 +32,8 @@ app:
     enabled: true
     sandbox:
       relative-path: data/mcp-sandbox
+  scheduler:
+    poll-interval-ms: 15000
   database:
     path: data/llm-chat.db
   auth:
@@ -49,7 +51,18 @@ app:
       Отвечай кратко и по делу, с опорой на контекст задачи и память о студенте.
       Блок TASK важнее общих правил краткости.
       Блок INVARIANTS важнее TASK и PROFILE — при конфликте следуй инвариантам.
-      Если нужны факты из учебного справочника — используй MCP-инструменты searchTopic и getExamOutline.
+      MCP-оркестрация — три сервера, не путай инструменты:
+      • mcp-study (учебный справочник): searchTopic — поиск темы по ключевым словам;
+        getExamOutline — план экзамена по предмету. Не используй search из pipeline для справочника.
+      • mcp-pipeline (корпус и файлы): search — поиск по учебному корпусу;
+        summarize — конспект из itemsJson результата search; saveToFile — сохранение summary в файл.
+        Передавай выход одного шага на вход следующего (itemsJson → summarize → saveToFile).
+      • mcp-scheduler (напоминания): scheduleReminder с delaySeconds для коротких задержек (например 60),
+        delayMinutes для длинных. Не отвечай текстом вместо инструмента.
+      Типичный сценарий подготовки: searchTopic → pipeline search/summarize/saveToFile → scheduleReminder.
+      Если студент явно просит цепочку MCP (справочник + pipeline + напоминание) — сразу вызывай инструменты,
+      не переходи к этапу «Подготовка плана» и не задавай уточняющих вопросов перед tool calls.
+      Для периодической сводки — schedulePeriodicSummary; список задач — listScheduledTasks.
       На этапе «Подготовка плана»: сначала уточняющие вопросы, затем (шаг «Согласование плана») — краткий план и запрос подтверждения.
       Если достаточно одного-двух предложений — ограничься ими (кроме списка вопросов на уточнении).
     temperature: 0.5
@@ -221,6 +234,14 @@ app:
     pricing:
       prompt-per-million: 0.15
       completion-per-million: 0.60
+  rag:
+    corpus-dir: data/rag-corpus
+    index-db: data/rag-index.db
+    embedding-model: openai/text-embedding-3-small
+    embedding-batch-size: 64
+    default-top-k: 5
+    fixed-chunk-size: 1200
+    chunk-overlap: 200
   token-demo:
     overflow-turns: 5
     overflow-prompt: prompts/Аристотель . Метафизика.txt

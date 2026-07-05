@@ -1,5 +1,6 @@
 package com.example.llmchat.invariants;
 
+import com.example.llmchat.mcp.McpOrchestrationPromptDetector;
 import com.example.llmchat.personalization.UserProfile;
 import com.example.llmchat.task.PlanningSteps;
 import com.example.llmchat.task.TaskPhase;
@@ -51,6 +52,9 @@ public class InvariantGuard {
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern BRIEF_CONSTRAINT = Pattern.compile(
             "\\b(кратко|до\\s+\\d+\\s+предложен|без\\s+воды|коротко)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private static final Pattern SCHEDULER_REQUEST = Pattern.compile(
+            "\\b(?:запланиру(?:й|йте|ем|и)|напомни(?:те)?|напоминание|scheduleReminder|schedulePeriodicSummary)\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern FINISH_WITHOUT_VALIDATION = Pattern.compile(
             WORD_START
@@ -120,6 +124,9 @@ public class InvariantGuard {
         if (message == null || message.isBlank()) {
             return false;
         }
+        if (McpOrchestrationPromptDetector.isExamPrepOrchestration(message)) {
+            return false;
+        }
         Optional<TaskState> taskState = context.taskState();
         return switch (rule.guard()) {
             case VALIDATION_BEFORE_EXECUTION_COMPLETE -> matchesEarlyValidation(context, taskState, message);
@@ -141,6 +148,9 @@ public class InvariantGuard {
             InvariantContext context,
             Optional<TaskState> taskState,
             String message) {
+        if (SCHEDULER_REQUEST.matcher(message.trim()).find()) {
+            return false;
+        }
         if (!TaskStateTransitions.readyForValidation(message)
                 && !EARLY_MCQ_REQUEST.matcher(message.trim()).find()) {
             return false;

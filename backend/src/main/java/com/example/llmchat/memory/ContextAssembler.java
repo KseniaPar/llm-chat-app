@@ -27,6 +27,15 @@ import java.util.Optional;
 @Component
 public class ContextAssembler {
 
+    private static final String AGENT_MCP_SYSTEM_HINT = """
+            Режим agent-driven MCP (Day 20): доступны tools серверов mcp-study, mcp-pipeline, mcp-scheduler.
+            Если пользователь просит найти материалы, собрать конспект, сохранить файл или поставить напоминание:
+            1) searchTopic (study) или search (pipeline) — найти материалы;
+            2) summarize (pipeline) — собрать конспект из itemsJson;
+            3) saveToFile (pipeline) — сохранить поле summary из summarize, не одну строку из searchTopic;
+            4) scheduleReminder (scheduler) — если просили напоминание.
+            Учебный Task FSM и инварианты планирования здесь не действуют.""";
+
     private final MemoryManager memoryManager;
     private final ContextCompressionService contextCompressionService;
     private final PersonalizationService personalizationService;
@@ -68,6 +77,17 @@ public class ContextAssembler {
             ContextStrategy strategy,
             boolean useDay10Strategy,
             InvariantCheckResult invariantCheck) {
+        return assemble(userId, sessionId, prompt, strategy, useDay10Strategy, invariantCheck, false);
+    }
+
+    public AssembledContext assemble(
+            String userId,
+            String sessionId,
+            String prompt,
+            ContextStrategy strategy,
+            boolean useDay10Strategy,
+            InvariantCheckResult invariantCheck,
+            boolean agentDrivenMcp) {
         MemoryContextSnapshot snapshot = memoryManager.buildContextSnapshot(userId, sessionId, strategy);
         List<String> logs = new ArrayList<>(snapshot.memoryLogs());
 
@@ -88,11 +108,15 @@ public class ContextAssembler {
                 profile.constraints(),
                 profileApplied);
 
-        TaskState taskState = taskStateService.getState(sessionId).orElse(null);
-        List<TaskTransitionType> allowedTransitions = taskTransitionService.allowedNext(sessionId);
-        String taskBlock = taskStateService.formatTaskBlock(taskState, allowedTransitions);
+        TaskState taskState = agentDrivenMcp ? null : taskStateService.getState(sessionId).orElse(null);
+        List<TaskTransitionType> allowedTransitions = agentDrivenMcp
+                ? List.of()
+                : taskTransitionService.allowedNext(sessionId);
+        String taskBlock = agentDrivenMcp ? null : taskStateService.formatTaskBlock(taskState, allowedTransitions);
         boolean taskApplied = taskBlock != null;
-        List<String> taskStateLogs = taskStateService.buildTaskStateLogs(taskState, taskApplied);
+        List<String> taskStateLogs = agentDrivenMcp
+                ? List.of("TASK → не в контексте (agent-driven MCP)")
+                : taskStateService.buildTaskStateLogs(taskState, taskApplied);
         if (taskApplied) {
             messages.add(new OpenRouterHttpClient.ChatMessage("system", taskBlock));
         }
@@ -104,14 +128,23 @@ public class ContextAssembler {
                 prompt,
                 Optional.ofNullable(taskState),
                 profile);
-        String invariantsBlock = invariantsService.formatInvariantsBlock(invariantContext, invariantCheck);
+        String invariantsBlock = agentDrivenMcp
+                ? null
+                : invariantsService.formatInvariantsBlock(invariantContext, invariantCheck);
         boolean invariantsApplied = invariantsBlock != null;
-        List<String> invariantLogs = invariantsService.buildInvariantsLogs(
-                invariantContext, invariantsApplied, invariantCheck);
-        InvariantsSnapshot invariantsSnapshot = invariantsService.toSnapshot(
-                invariantContext, invariantsApplied, invariantCheck);
+        List<String> invariantLogs = agentDrivenMcp
+                ? List.of("INVARIANTS → не в контексте (agent-driven MCP)")
+                : invariantsService.buildInvariantsLogs(
+                        invariantContext, invariantsApplied, invariantCheck);
+        InvariantsSnapshot invariantsSnapshot = agentDrivenMcp
+                ? new InvariantsSnapshot(0, List.of(), false, List.of())
+                : invariantsService.toSnapshot(
+                        invariantContext, invariantsApplied, invariantCheck);
         if (invariantsApplied) {
             messages.add(new OpenRouterHttpClient.ChatMessage("system", invariantsBlock));
+        }
+        if (agentDrivenMcp) {
+            messages.add(new OpenRouterHttpClient.ChatMessage("system", AGENT_MCP_SYSTEM_HINT));
         }
 
         String longTermBlock = memoryManager.formatLongTermBlock(snapshot.longTermInContext());
