@@ -235,4 +235,111 @@ document.getElementById('rag-refresh-demo')?.addEventListener('click', () => {
   loadDemo().then(() => setStatus('Данные обновлены из БД'));
 });
 
+function renderQueryCompare(data) {
+  const el = document.getElementById('rag-query-compare');
+  if (!el) return;
+  el.classList.remove('hidden');
+  const chunks = (data.withRag?.chunksUsed || [])
+    .map((c) => `<li>[${(c.score ?? 0).toFixed?.(3) ?? c.score}] ${escapeHtml(c.section)}: ${escapeHtml(c.preview)}</li>`)
+    .join('');
+  el.innerHTML = `
+    <div class="query-compare__col query-compare__col--plain">
+      <p class="query-compare__title">Без RAG</p>
+      <p class="query-compare__text">${escapeHtml(data.withoutRag?.answer || '—')}</p>
+    </div>
+    <div class="query-compare__col query-compare__col--rag">
+      <p class="query-compare__title">С RAG</p>
+      <p class="query-compare__text">${escapeHtml(data.withRag?.answer || '—')}</p>
+      ${chunks ? `<ul class="query-compare__chunks">${chunks}</ul>` : ''}
+    </div>`;
+}
+
+async function ragQueryCompare() {
+  const question = document.getElementById('rag-question')?.value?.trim();
+  if (!question) return;
+  setStatus('Сравнение с/без RAG…');
+  try {
+    const res = await apiFetch('/api/rag/query/compare', {
+      method: 'POST',
+      body: JSON.stringify({ question, strategy: 'STRUCTURE', topK: 5 }),
+    });
+    if (!res.ok) throw new Error(await parseError(res));
+    renderQueryCompare(await res.json());
+    setStatus('Сравнение готово');
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+function setEvalStatus(text, isError = false) {
+  const el = document.getElementById('rag-eval-status');
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('demo-status--error', isError);
+}
+
+function renderEvalQuestions(questions, resultsById = {}) {
+  const tbody = document.getElementById('rag-eval-body');
+  if (!tbody) return;
+  if (!questions?.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="eval-table__empty">Вопросы не загружены</td></tr>';
+    return;
+  }
+  tbody.innerHTML = questions.map((q) => {
+    const result = resultsById[q.id];
+    const without = result?.withoutRag?.answer;
+    const withR = result?.withRag?.answer;
+    const matched = (result?.sourcesMatched || []).join(', ');
+    return `
+      <tr>
+        <td>${escapeHtml(q.id)}</td>
+        <td>${escapeHtml(q.section)}</td>
+        <td>${escapeHtml(q.question)}</td>
+        <td>${escapeHtml(q.expectedAnswer)}</td>
+        <td>${(q.expectedSources || []).map((s) => escapeHtml(s)).join(', ')}</td>
+        <td class="eval-table__answer">${without ? escapeHtml(without) : '—'}</td>
+        <td class="eval-table__answer">${withR ? escapeHtml(withR) : '—'}${matched ? `<div class="eval-table__matched">✓ ${escapeHtml(matched)}</div>` : ''}</td>
+      </tr>`;
+  }).join('');
+}
+
+async function loadEvalQuestions() {
+  setEvalStatus('Загрузка вопросов…');
+  try {
+    const res = await apiFetch('/api/rag/eval/questions');
+    if (!res.ok) throw new Error(await parseError(res));
+    const questions = await res.json();
+    renderEvalQuestions(questions);
+    setEvalStatus(`Загружено ${questions.length} контрольных вопросов`);
+  } catch (error) {
+    setEvalStatus(error.message, true);
+  }
+}
+
+async function runEval() {
+  setEvalStatus('Eval: 10 вопросов × 2 режима… (3–5 мин)');
+  try {
+    const res = await apiFetch('/api/rag/eval/run', {
+      method: 'POST',
+      body: JSON.stringify({ strategy: 'STRUCTURE', topK: 5 }),
+    });
+    if (!res.ok) throw new Error(await parseError(res));
+    const data = await res.json();
+    const byId = {};
+    (data.results || []).forEach((r) => { byId[r.question.id] = r; });
+    renderEvalQuestions(data.results.map((r) => r.question), byId);
+    setEvalStatus(`Eval: ${data.ragWithSources}/${data.totalQuestions} ответов с RAG содержат ожидаемые источники`);
+  } catch (error) {
+    setEvalStatus(error.message, true);
+  }
+}
+
+document.getElementById('rag-query-compare-btn')?.addEventListener('click', ragQueryCompare);
+document.getElementById('rag-question')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') ragQueryCompare();
+});
+document.getElementById('rag-eval-load-btn')?.addEventListener('click', loadEvalQuestions);
+document.getElementById('rag-eval-run-btn')?.addEventListener('click', runEval);
+
 loadDemo();
+loadEvalQuestions();
