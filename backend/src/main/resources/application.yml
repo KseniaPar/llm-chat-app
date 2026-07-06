@@ -247,6 +247,16 @@ app:
     fixed-chunk-size: 1200
     chunk-overlap: 200
     structure-chunk-overlap: 0
+    dialog-memory-update-prompt: |
+      Ты обновляешь память задачи в учебном RAG-диалоге по материалу «Основы православия».
+      Верни ТОЛЬКО JSON:
+      {"dialogGoal": "...", "clarifications": ["..."], "fixedTerms": ["..."]}
+      dialogGoal — главная цель диалога студента (подготовка к экзамену, разбор таинств, уточнение терминов и т.п.).
+      clarifications — что студент уточнил или попросил (новые элементы добавляй, старые сохраняй).
+      fixedTerms — зафиксированные термины, определения или ограничения, о которых договорились.
+      Если цель не изменилась — верни прежнюю dialogGoal.
+      Не дублируй clarifications и fixedTerms.
+      Без markdown — только JSON.
   token-demo:
     overflow-turns: 5
     overflow-prompt: prompts/Аристотель . Метафизика.txt
