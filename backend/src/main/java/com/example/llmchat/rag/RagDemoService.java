@@ -44,7 +44,7 @@ public class RagDemoService {
         String corpusFile = docs.isEmpty() ? "—" : docs.get(0).title();
 
         return new RagDemoResponse(
-                "День 24 — цитаты, источники и анти-галлюцинации",
+                "День 25 — мини-чат с RAG и памятью задачи",
                 corpusFile,
                 corpus.documentCount(),
                 corpus.estimatedPages(),
@@ -57,7 +57,8 @@ public class RagDemoService {
                         "4. Сохранение в SQLite — chunks + metadata + embedding BLOB",
                         "5. Query rewrite → vector search (pool) → similarity filter → top-K",
                         "6. Обязательные sources + quotes в ответе, режим «не знаю» при слабом контексте",
-                        "7. Eval: проверка источников, цитат и смысла на 10 вопросах"),
+                        "7. Мультитurn чат: история + RAG каждый ход + task memory (цель, уточнения, термины)",
+                        "8. Сценарии диалогов: 2 × 10–15 сообщений по корпусу «Основы православия»"),
                 List.of(
                         "Корпус: PDF «" + corpusFile + "» (~" + corpus.estimatedPages() + " стр.)",
                         "Извлечение текста: Apache PDFBox 3",
