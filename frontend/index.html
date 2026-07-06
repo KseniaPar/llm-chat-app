@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 23 — RAG Filter Demo</title>
+  <title>День 24 — RAG Citations Demo</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -12,58 +12,58 @@
 <body>
   <main class="rag-app">
     <header class="rag-app__header">
-      <p class="rag-app__badge">Day 23</p>
-      <h1 class="rag-app__title">Reranking и фильтрация</h1>
-      <p class="rag-app__desc">Query rewrite → search pool → similarity filter → top-K</p>
+      <p class="rag-app__badge">Day 24</p>
+      <h1 class="rag-app__title">Цитаты, источники и анти-галлюцинации</h1>
+      <p class="rag-app__desc">Ответ + sources + quotes · режим «не знаю» при слабом контексте</p>
     </header>
 
     <section class="demo-card demo-card--actions">
-      <h2 class="demo-card__title">1. Сравнение режимов retrieval</h2>
+      <h2 class="demo-card__title">1. Запрос с цитированием</h2>
       <p class="demo-card__note">
-        Три режима: <strong>RAW</strong> (top-K без фильтра),
-        <strong>FILTERED</strong> (порог similarity),
-        <strong>REWRITE_FILTERED</strong> (LLM-переформулировка + фильтр).
-        Pool = 20 кандидатов до фильтрации.
+        Каждый ответ содержит <strong>answer</strong>, <strong>sources</strong> (source + section + chunk_id)
+        и <strong>quotes</strong> (фрагменты из найденных чанков).
+        Если max semantic score &lt; порога confidence — ассистент отвечает «не знаю».
       </p>
       <label class="rag-panel__label">
         Вопрос
-        <input id="rag-filter-question" class="rag-panel__input" type="text" placeholder="Что такое Филиокве?">
+        <input id="rag-citation-question" class="rag-panel__input" type="text" placeholder="Что такое Филиокве?">
       </label>
       <label class="rag-panel__label rag-panel__label--inline">
-        Порог similarity
-        <input id="rag-min-similarity" class="rag-panel__range" type="range" min="0.3" max="0.95" step="0.05" value="0.65">
-        <output id="rag-min-similarity-value" for="rag-min-similarity">0.65</output>
+        Порог confidence
+        <input id="rag-min-confidence" class="rag-panel__range" type="range" min="0.3" max="0.95" step="0.05" value="0.55">
+        <output id="rag-min-confidence-value" for="rag-min-confidence">0.55</output>
       </label>
       <div class="rag-panel__actions">
-        <button id="rag-modes-compare-btn" class="rag-panel__btn rag-panel__btn--primary" type="button">Сравнить RAW / FILTERED / REWRITE</button>
+        <button id="rag-citation-query-btn" class="rag-panel__btn rag-panel__btn--primary" type="button">Спросить с цитированием</button>
       </div>
-      <p id="rag-modes-status" class="demo-status" aria-live="polite"></p>
-      <div id="rag-modes-compare" class="modes-compare hidden"></div>
+      <p id="rag-citation-status" class="demo-status" aria-live="polite"></p>
+      <div id="rag-citation-result" class="citation-result hidden"></div>
     </section>
 
     <section class="demo-card">
-      <h2 class="demo-card__title">2. Eval режимов (10 вопросов)</h2>
-      <p class="demo-card__note">Сравнение RAW vs FILTERED vs REWRITE_FILTERED на контрольном наборе.</p>
+      <h2 class="demo-card__title">2. Eval цитирования (10 вопросов)</h2>
+      <p class="demo-card__note">
+        Проверка: есть ли sources и quotes в каждом ответе, совпадают ли цитаты с чанками и смысл ответа.
+      </p>
       <div class="rag-panel__actions">
-        <button id="rag-mode-eval-btn" class="rag-panel__btn rag-panel__btn--primary" type="button">Eval режимов (10×3)</button>
+        <button id="rag-citation-eval-btn" class="rag-panel__btn rag-panel__btn--primary" type="button">Eval цитирования (10×)</button>
       </div>
-      <p id="rag-mode-eval-status" class="demo-status" aria-live="polite"></p>
+      <p id="rag-citation-eval-status" class="demo-status" aria-live="polite"></p>
       <div class="compare-table-wrap">
-        <table id="rag-mode-eval-table" class="compare-table eval-table">
+        <table id="rag-citation-eval-table" class="compare-table eval-table">
           <thead>
             <tr>
               <th>#</th>
               <th>Вопрос</th>
-              <th>RAW K</th>
-              <th>FILTER K</th>
-              <th>REWRITE K</th>
-              <th>RAW ✓</th>
-              <th>FILTER ✓</th>
-              <th>REWRITE ✓</th>
+              <th>Sources</th>
+              <th>Quotes</th>
+              <th>Цитаты ✓</th>
+              <th>Смысл ✓</th>
+              <th>Итог</th>
             </tr>
           </thead>
-          <tbody id="rag-mode-eval-body">
-            <tr><td colspan="8" class="eval-table__empty">Нажмите «Eval режимов»</td></tr>
+          <tbody id="rag-citation-eval-body">
+            <tr><td colspan="7" class="eval-table__empty">Нажмите «Eval цитирования»</td></tr>
           </tbody>
         </table>
       </div>

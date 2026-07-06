@@ -44,7 +44,7 @@ public class RagDemoService {
         String corpusFile = docs.isEmpty() ? "—" : docs.get(0).title();
 
         return new RagDemoResponse(
-                "День 23 — reranking, фильтрация и query rewrite",
+                "День 24 — цитаты, источники и анти-галлюцинации",
                 corpusFile,
                 corpus.documentCount(),
                 corpus.estimatedPages(),
@@ -56,7 +56,8 @@ public class RagDemoService {
                         "3. Embeddings — OpenRouter / " + embeddingModel,
                         "4. Сохранение в SQLite — chunks + metadata + embedding BLOB",
                         "5. Query rewrite → vector search (pool) → similarity filter → top-K",
-                        "6. Сравнение режимов RAW / FILTERED / REWRITE_FILTERED"),
+                        "6. Обязательные sources + quotes в ответе, режим «не знаю» при слабом контексте",
+                        "7. Eval: проверка источников, цитат и смысла на 10 вопросах"),
                 List.of(
                         "Корпус: PDF «" + corpusFile + "» (~" + corpus.estimatedPages() + " стр.)",
                         "Извлечение текста: Apache PDFBox 3",

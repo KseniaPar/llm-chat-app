@@ -4,6 +4,7 @@ import com.example.llmchat.dto.RagCompareResponse;
 import com.example.llmchat.dto.RagDemoResponse;
 import com.example.llmchat.dto.RagEvalQuestionDto;
 import com.example.llmchat.dto.RagEvalResponse;
+import com.example.llmchat.dto.RagEvalValidationResponse;
 import com.example.llmchat.dto.RagModeCompareResponse;
 import com.example.llmchat.dto.RagModeEvalResponse;
 import com.example.llmchat.dto.RagIndexRequest;
@@ -169,6 +170,21 @@ public class RagController {
         log.info("POST /api/rag/eval/modes/run strategy={}", strategy);
         try {
             return evalService.runModeEval(strategy, topK, minSimilarity);
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        }
+    }
+
+    @PostMapping("/eval/validate")
+    public RagEvalValidationResponse runCitationValidation(@RequestBody(required = false) RagQueryRequest request) {
+        ChunkingStrategy strategy = request != null && request.strategy() != null
+                ? request.strategy()
+                : ChunkingStrategy.STRUCTURE;
+        Integer topK = request != null ? request.topK() : null;
+        Double minSimilarity = request != null ? request.minSimilarity() : null;
+        log.info("POST /api/rag/eval/validate strategy={}", strategy);
+        try {
+            return evalService.runCitationValidation(strategy, topK, minSimilarity);
         } catch (IllegalStateException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
         }

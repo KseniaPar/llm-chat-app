@@ -15,6 +15,8 @@ import java.util.regex.Pattern;
 public class StructureAwareChunker {
 
     private static final Pattern MARKDOWN_HEADER = Pattern.compile("^(#{1,3})\\s+(.+)$", Pattern.MULTILINE);
+    private static final Pattern INLINE_HEADING = Pattern.compile(
+            "(?m)^([А-ЯЁ][А-Яа-яё\\-]{2,}(?:\\s+[А-Яа-яё\\-]{2,}){0,5})\\s*$");
     private static final Pattern PDF_SECTION = Pattern.compile(
             "(?m)^(?:"
                     + "(?:Глава|ГЛАВА|Часть|ЧАСТЬ|Раздел|РАЗДЕЛ|Отдел|ОТДЕЛ|Параграф|ПАРАГРАФ)"
@@ -29,9 +31,13 @@ public class StructureAwareChunker {
             Pattern.MULTILINE);
 
     private final int maxSectionChars;
+    private final int structureOverlap;
 
-    public StructureAwareChunker(@Value("${app.rag.fixed-chunk-size:1200}") int maxSectionChars) {
+    public StructureAwareChunker(
+            @Value("${app.rag.fixed-chunk-size:1200}") int maxSectionChars,
+            @Value("${app.rag.structure-chunk-overlap:0}") int structureOverlap) {
         this.maxSectionChars = maxSectionChars;
+        this.structureOverlap = Math.max(0, structureOverlap);
     }
 
     public List<RagChunk> chunk(RagDocument document) {
@@ -83,8 +89,31 @@ public class StructureAwareChunker {
     }
 
     private List<RagChunk> splitLargeText(RagDocument document, String text, String sectionTitle) {
+        List<Section> subsections = findInlineSubsections(text);
+        if (subsections.size() > 1) {
+            List<RagChunk> chunks = new ArrayList<>();
+            int chunkNum = 0;
+            for (Section subsection : subsections) {
+                String slice = text.substring(subsection.start(), subsection.end()).trim();
+                if (slice.length() < 50) {
+                    continue;
+                }
+                if (slice.length() > maxSectionChars * 2) {
+                    chunks.addAll(splitBySize(document, slice, subsection.title()));
+                    continue;
+                }
+                chunkNum++;
+                chunks.add(buildChunk(document, subsection.title(), slice, subsection.start(), subsection.end(), chunkNum));
+            }
+            if (!chunks.isEmpty()) {
+                return chunks;
+            }
+        }
+        return splitBySize(document, text, sectionTitle);
+    }
+
+    private List<RagChunk> splitBySize(RagDocument document, String text, String sectionTitle) {
         List<RagChunk> chunks = new ArrayList<>();
-        int overlap = Math.min(200, maxSectionChars / 6);
         int index = 0;
         int chunkNum = 0;
         while (index < text.length()) {
@@ -98,22 +127,56 @@ public class StructureAwareChunker {
             String slice = text.substring(index, end).trim();
             if (!slice.isEmpty()) {
                 chunkNum++;
-                chunks.add(new RagChunk(
-                        document.title() + "#" + sanitize(sectionTitle) + "-" + chunkNum,
-                        document.sourcePath(),
-                        document.title(),
-                        sectionTitle,
-                        slice,
-                        index,
-                        end,
-                        FixedSizeChunker.estimateTokens(slice)));
+                chunks.add(buildChunk(document, sectionTitle, slice, index, end, chunkNum));
             }
             if (end >= text.length()) {
                 break;
             }
-            index = Math.max(index + 1, end - overlap);
+            index = structureOverlap > 0
+                    ? Math.max(index + 1, end - structureOverlap)
+                    : end;
         }
         return chunks;
+    }
+
+    private RagChunk buildChunk(
+            RagDocument document,
+            String sectionTitle,
+            String slice,
+            int charStart,
+            int charEnd,
+            int chunkNum) {
+        return new RagChunk(
+                document.title() + "#" + sanitize(sectionTitle) + "-" + chunkNum,
+                document.sourcePath(),
+                document.title(),
+                sectionTitle,
+                slice,
+                charStart,
+                charEnd,
+                FixedSizeChunker.estimateTokens(slice));
+    }
+
+    private List<Section> findInlineSubsections(String text) {
+        List<Section> sections = new ArrayList<>();
+        Matcher matcher = INLINE_HEADING.matcher(text);
+        int lastStart = 0;
+        String lastTitle = null;
+        while (matcher.find()) {
+            String title = matcher.group(1).trim();
+            if (title.length() < 5 || title.length() > 64 || title.endsWith(".")) {
+                continue;
+            }
+            if (lastTitle != null && matcher.start() > lastStart) {
+                sections.add(new Section(lastTitle, lastStart, matcher.start()));
+            }
+            lastTitle = title;
+            lastStart = matcher.start();
+        }
+        if (lastTitle != null && lastStart < text.length()) {
+            sections.add(new Section(lastTitle, lastStart, text.length()));
+        }
+        return sections;
     }
 
     private List<RagChunk> chunkMarkdown(RagDocument document, String text) {
