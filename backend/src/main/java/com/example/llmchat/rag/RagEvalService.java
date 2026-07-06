@@ -3,6 +3,8 @@ package com.example.llmchat.rag;
 import com.example.llmchat.dto.RagEvalQuestionDto;
 import com.example.llmchat.dto.RagEvalResponse;
 import com.example.llmchat.dto.RagEvalResultDto;
+import com.example.llmchat.dto.RagModeEvalResponse;
+import com.example.llmchat.dto.RagModeEvalResultDto;
 import com.example.llmchat.dto.RagQueryCompareResponse;
 import com.example.llmchat.dto.RagQueryResponse;
 import org.springframework.stereotype.Service;
@@ -52,6 +54,47 @@ public class RagEvalService {
                 questions.size(),
                 ragWithSources,
                 questions.size() - ragWithSources,
+                results);
+    }
+
+    public RagModeEvalResponse runModeEval(ChunkingStrategy strategy, Integer topK, Double minSimilarity) {
+        List<RagEvalQuestionDto> questions = questionLoader.loadAll();
+        List<RagModeEvalResultDto> results = new ArrayList<>();
+        int rawWithSources = 0;
+        int filteredWithSources = 0;
+        int rewriteFilteredWithSources = 0;
+
+        for (RagEvalQuestionDto question : questions) {
+            var compared = queryService.compareModes(question.question(), strategy, topK, minSimilarity);
+            List<String> rawMatched = matchSources(question, compared.raw().response());
+            List<String> filteredMatched = matchSources(question, compared.filtered().response());
+            List<String> rewriteMatched = matchSources(question, compared.rewriteFiltered().response());
+
+            if (!rawMatched.isEmpty()) {
+                rawWithSources++;
+            }
+            if (!filteredMatched.isEmpty()) {
+                filteredWithSources++;
+            }
+            if (!rewriteMatched.isEmpty()) {
+                rewriteFilteredWithSources++;
+            }
+
+            results.add(new RagModeEvalResultDto(
+                    question,
+                    compared.raw().retrieval().topKAfter(),
+                    compared.filtered().retrieval().topKAfter(),
+                    compared.rewriteFiltered().retrieval().topKAfter(),
+                    rawMatched,
+                    filteredMatched,
+                    rewriteMatched));
+        }
+
+        return new RagModeEvalResponse(
+                questions.size(),
+                rawWithSources,
+                filteredWithSources,
+                rewriteFilteredWithSources,
                 results);
     }
 

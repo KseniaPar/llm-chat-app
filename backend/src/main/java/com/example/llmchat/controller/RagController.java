@@ -4,6 +4,8 @@ import com.example.llmchat.dto.RagCompareResponse;
 import com.example.llmchat.dto.RagDemoResponse;
 import com.example.llmchat.dto.RagEvalQuestionDto;
 import com.example.llmchat.dto.RagEvalResponse;
+import com.example.llmchat.dto.RagModeCompareResponse;
+import com.example.llmchat.dto.RagModeEvalResponse;
 import com.example.llmchat.dto.RagIndexRequest;
 import com.example.llmchat.dto.RagIndexResponse;
 import com.example.llmchat.dto.RagQueryCompareResponse;
@@ -17,6 +19,7 @@ import com.example.llmchat.rag.RagEvalService;
 import com.example.llmchat.rag.RagIndexRepository;
 import com.example.llmchat.rag.RagIndexingService;
 import com.example.llmchat.rag.RagQueryService;
+import com.example.llmchat.rag.RagRetrievalMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -98,9 +101,11 @@ public class RagController {
         }
         ChunkingStrategy strategy = request.strategy() != null ? request.strategy() : ChunkingStrategy.STRUCTURE;
         boolean useRag = request.useRag() == null || request.useRag();
-        log.info("POST /api/rag/query useRag={} strategy={}", useRag, strategy);
+        RagRetrievalMode mode = request.mode() != null ? request.mode() : RagRetrievalMode.FILTERED;
+        log.info("POST /api/rag/query useRag={} strategy={} mode={}", useRag, strategy, mode);
         try {
-            return queryService.query(request.question(), useRag, strategy, request.topK());
+            return queryService.query(
+                    request.question(), useRag, strategy, request.topK(), mode, request.minSimilarity());
         } catch (IllegalStateException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
         }
@@ -120,6 +125,21 @@ public class RagController {
         }
     }
 
+    @PostMapping("/query/modes/compare")
+    public RagModeCompareResponse queryModesCompare(@RequestBody RagQueryRequest request) {
+        if (request.question() == null || request.question().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "question is required");
+        }
+        ChunkingStrategy strategy = request.strategy() != null ? request.strategy() : ChunkingStrategy.STRUCTURE;
+        log.info("POST /api/rag/query/modes/compare strategy={}", strategy);
+        try {
+            return queryService.compareModes(
+                    request.question(), strategy, request.topK(), request.minSimilarity());
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        }
+    }
+
     @GetMapping("/eval/questions")
     public List<RagEvalQuestionDto> evalQuestions() {
         return evalService.questions();
@@ -134,6 +154,21 @@ public class RagController {
         log.info("POST /api/rag/eval/run strategy={}", strategy);
         try {
             return evalService.runEval(strategy, topK);
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        }
+    }
+
+    @PostMapping("/eval/modes/run")
+    public RagModeEvalResponse runModeEval(@RequestBody(required = false) RagQueryRequest request) {
+        ChunkingStrategy strategy = request != null && request.strategy() != null
+                ? request.strategy()
+                : ChunkingStrategy.STRUCTURE;
+        Integer topK = request != null ? request.topK() : null;
+        Double minSimilarity = request != null ? request.minSimilarity() : null;
+        log.info("POST /api/rag/eval/modes/run strategy={}", strategy);
+        try {
+            return evalService.runModeEval(strategy, topK, minSimilarity);
         } catch (IllegalStateException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
         }

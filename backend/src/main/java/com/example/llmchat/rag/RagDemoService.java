@@ -44,7 +44,7 @@ public class RagDemoService {
         String corpusFile = docs.isEmpty() ? "—" : docs.get(0).title();
 
         return new RagDemoResponse(
-                "День 22 — первый RAG-запрос и сравнение с/без RAG",
+                "День 23 — reranking, фильтрация и query rewrite",
                 corpusFile,
                 corpus.documentCount(),
                 corpus.estimatedPages(),
@@ -55,7 +55,8 @@ public class RagDemoService {
                         "2. Chunking — FIXED_SIZE или STRUCTURE",
                         "3. Embeddings — OpenRouter / " + embeddingModel,
                         "4. Сохранение в SQLite — chunks + metadata + embedding BLOB",
-                        "5. Сравнение двух стратегий chunking"),
+                        "5. Query rewrite → vector search (pool) → similarity filter → top-K",
+                        "6. Сравнение режимов RAW / FILTERED / REWRITE_FILTERED"),
                 List.of(
                         "Корпус: PDF «" + corpusFile + "» (~" + corpus.estimatedPages() + " стр.)",
                         "Извлечение текста: Apache PDFBox 3",
