@@ -3,6 +3,8 @@ package com.example.llmchat.rag;
 import com.example.llmchat.dto.RagEvalQuestionDto;
 import com.example.llmchat.dto.RagEvalResponse;
 import com.example.llmchat.dto.RagEvalResultDto;
+import com.example.llmchat.dto.RagEvalValidationResponse;
+import com.example.llmchat.dto.RagEvalValidationResultDto;
 import com.example.llmchat.dto.RagModeEvalResponse;
 import com.example.llmchat.dto.RagModeEvalResultDto;
 import com.example.llmchat.dto.RagQueryCompareResponse;
@@ -18,10 +20,15 @@ public class RagEvalService {
 
     private final RagEvalQuestionLoader questionLoader;
     private final RagQueryService queryService;
+    private final RagEvalValidator evalValidator;
 
-    public RagEvalService(RagEvalQuestionLoader questionLoader, RagQueryService queryService) {
+    public RagEvalService(
+            RagEvalQuestionLoader questionLoader,
+            RagQueryService queryService,
+            RagEvalValidator evalValidator) {
         this.questionLoader = questionLoader;
         this.queryService = queryService;
+        this.evalValidator = evalValidator;
     }
 
     public List<RagEvalQuestionDto> questions() {
@@ -30,6 +37,29 @@ public class RagEvalService {
 
     public RagQueryCompareResponse compareOne(String question, ChunkingStrategy strategy, Integer topK) {
         return queryService.compare(question, strategy, topK);
+    }
+
+    public RagEvalValidationResponse runCitationValidation(ChunkingStrategy strategy, Integer topK, Double minSimilarity) {
+        List<RagEvalQuestionDto> questions = questionLoader.loadAll();
+        List<RagEvalValidationResultDto> results = new ArrayList<>();
+        int passed = 0;
+
+        for (RagEvalQuestionDto question : questions) {
+            RagQueryResponse response = queryService.query(
+                    question.question(),
+                    true,
+                    strategy,
+                    topK,
+                    RagRetrievalMode.REWRITE_FILTERED,
+                    minSimilarity);
+            RagEvalValidationResultDto validated = evalValidator.validate(question, response);
+            if (validated.passed()) {
+                passed++;
+            }
+            results.add(validated);
+        }
+
+        return new RagEvalValidationResponse(questions.size(), passed, questions.size() - passed, results);
     }
 
     public RagEvalResponse runEval(ChunkingStrategy strategy, Integer topK) {

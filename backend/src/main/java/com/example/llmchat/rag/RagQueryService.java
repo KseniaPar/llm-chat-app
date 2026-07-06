@@ -18,11 +18,16 @@ public class RagQueryService {
     private static final String RAG_SYSTEM_PROMPT = """
             Ты учебный ассистент по материалу «Основы православия».
             Отвечай ТОЛЬКО на основе предоставленного контекста из документа.
-            Если в контексте нет ответа — честно скажи об этом.
-            Отвечай кратко и по делу на русском языке.""";
+            Ответ должен опираться на переданные фрагменты — не добавляй факты вне контекста.
+            Отвечай кратко и по делу на русском языке.
+            Источники и цитаты будут добавлены системой автоматически — не перечисляй их в ответе.""";
+
+    private static final int PREVIEW_CHARS = 400;
 
     private final RagRetrievalService retrievalService;
     private final OpenRouterHttpClient openRouterHttpClient;
+    private final RagCitationBuilder citationBuilder;
+    private final RagRelevanceGuard relevanceGuard;
     private final String model;
     private final double temperature;
     private final int maxTokens;
@@ -32,6 +37,8 @@ public class RagQueryService {
     public RagQueryService(
             RagRetrievalService retrievalService,
             OpenRouterHttpClient openRouterHttpClient,
+            RagCitationBuilder citationBuilder,
+            RagRelevanceGuard relevanceGuard,
             @Value("${app.openrouter.model}") String model,
             @Value("${app.agent.temperature}") double temperature,
             @Value("${app.agent.max-tokens}") int maxTokens,
@@ -39,6 +46,8 @@ public class RagQueryService {
             @Value("${app.rag.search-pool-size:20}") int searchPoolSize) {
         this.retrievalService = retrievalService;
         this.openRouterHttpClient = openRouterHttpClient;
+        this.citationBuilder = citationBuilder;
+        this.relevanceGuard = relevanceGuard;
         this.model = model;
         this.temperature = temperature;
         this.maxTokens = maxTokens;
@@ -70,7 +79,7 @@ public class RagQueryService {
 
     public RagQueryCompareResponse compare(String question, ChunkingStrategy strategy, Integer topK) {
         RagQueryResponse withoutRag = query(question, false, strategy, topK);
-        RagQueryResponse withRag = query(question, true, strategy, topK, RagRetrievalMode.RAW, null);
+        RagQueryResponse withRag = query(question, true, strategy, topK, RagRetrievalMode.FILTERED, null);
         return new RagQueryCompareResponse(question, withoutRag, withRag);
     }
 
@@ -107,14 +116,32 @@ public class RagQueryService {
     }
 
     private RagQueryResponse buildRagResponse(String question, RagRetrievalService.RetrievalResult retrieval) {
-        List<RagRetrievalService.ScoredChunk> chunks = retrieval.chunks();
-        if (chunks.isEmpty()) {
+        RagRetrievalMetaDto meta = toMeta(retrieval);
+        RagConfidence confidence = relevanceGuard.assess(retrieval);
+
+        if (relevanceGuard.shouldRefuse(confidence)) {
             return new RagQueryResponse(
-                    "В базе не найдено достаточно релевантных фрагментов для ответа.",
+                    RagRelevanceGuard.UNKNOWN_ANSWER.trim(),
                     List.of(),
                     retrieval.mode().name(),
-                    toMeta(retrieval));
+                    meta,
+                    List.of(),
+                    List.of(),
+                    RagConfidence.UNKNOWN.name());
         }
+
+        List<RagRetrievalService.ScoredChunk> chunks = retrieval.chunks();
+        RagCitationBuilder.CitationBundle citations = citationBuilder.build(
+                retrieval.originalQuery(), retrieval.searchQuery(), chunks);
+        java.util.Map<String, String> quoteByChunkId = citations.quotes().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        q -> q.chunkId(),
+                        q -> q.text(),
+                        (left, right) -> left,
+                        java.util.LinkedHashMap::new));
+        List<RagQueryResponse.ChunkUsedDto> used = chunks.stream()
+                .map(chunk -> toChunkUsed(chunk, quoteByChunkId.get(chunk.chunkId())))
+                .toList();
 
         String contextBlock = buildContextBlock(chunks);
         String userMessage = contextBlock + "\n\nВопрос: " + question;
@@ -128,16 +155,29 @@ public class RagQueryService {
                         new OpenRouterHttpClient.ChatMessage("user", userMessage)),
                 false);
 
-        List<RagQueryResponse.ChunkUsedDto> used = chunks.stream()
-                .map(c -> new RagQueryResponse.ChunkUsedDto(
-                        c.chunkId(),
-                        c.source(),
-                        c.section(),
-                        c.score(),
-                        c.content().substring(0, Math.min(180, c.content().length()))))
-                .toList();
+        return new RagQueryResponse(
+                completion.content(),
+                used,
+                retrieval.mode().name(),
+                meta,
+                citations.sources(),
+                citations.quotes(),
+                confidence.name());
+    }
 
-        return new RagQueryResponse(completion.content(), used, retrieval.mode().name(), toMeta(retrieval));
+    private RagQueryResponse.ChunkUsedDto toChunkUsed(RagRetrievalService.ScoredChunk chunk, String quoteExcerpt) {
+        String preview;
+        if (quoteExcerpt != null && !quoteExcerpt.isBlank()) {
+            preview = quoteExcerpt;
+        } else {
+            preview = chunk.content().substring(0, Math.min(PREVIEW_CHARS, chunk.content().length()));
+        }
+        return new RagQueryResponse.ChunkUsedDto(
+                chunk.chunkId(),
+                chunk.source(),
+                chunk.section(),
+                chunk.semanticScore(),
+                preview);
     }
 
     private RagRetrievalMetaDto toMeta(RagRetrievalService.RetrievalResult retrieval) {
@@ -173,8 +213,9 @@ public class RagQueryService {
         for (int i = 0; i < chunks.size(); i++) {
             RagRetrievalService.ScoredChunk chunk = chunks.get(i);
             builder.append("--- Фрагмент ").append(i + 1)
-                    .append(" [").append(chunk.section()).append(", score=")
-                    .append(String.format("%.3f", chunk.score())).append("] ---\n");
+                    .append(" [id=").append(chunk.chunkId())
+                    .append(", ").append(chunk.section())
+                    .append(", score=").append(String.format("%.3f", chunk.semanticScore())).append("] ---\n");
             builder.append(chunk.content()).append("\n\n");
         }
         return builder.toString();

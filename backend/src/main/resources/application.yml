@@ -242,9 +242,11 @@ app:
     default-top-k: 5
     search-pool-size: 20
     min-similarity: 0.65
+    min-confidence-score: 0.55
     keyword-filter-floor: 0.18
     fixed-chunk-size: 1200
     chunk-overlap: 200
+    structure-chunk-overlap: 0
   token-demo:
     overflow-turns: 5
     overflow-prompt: prompts/Аристотель . Метафизика.txt
