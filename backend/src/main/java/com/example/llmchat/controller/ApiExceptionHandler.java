@@ -1,6 +1,7 @@
 package com.example.llmchat.controller;
 
 import com.example.llmchat.agent.OpenRouterHttpException;
+import com.example.llmchat.localllm.OllamaHttpException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
@@ -38,6 +39,25 @@ public class ApiExceptionHandler {
             body.put("rawError", rawBody.length() > 2000 ? rawBody.substring(0, 2000) + "..." : rawBody);
         }
         return ResponseEntity.status(status).body(body);
+    }
+
+    @ExceptionHandler(OllamaHttpException.class)
+    public ResponseEntity<Map<String, Object>> handleOllamaHttpException(OllamaHttpException exception) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", exception.getMessage());
+        body.put("ollamaError", true);
+        body.put("statusCode", exception.statusCode());
+        HttpStatus status = exception.statusCode() >= 500 || exception.statusCode() == 502
+                ? HttpStatus.BAD_GATEWAY
+                : HttpStatus.BAD_REQUEST;
+        return ResponseEntity.status(status).body(body);
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, String>> handleIllegalState(IllegalStateException exception) {
+        Map<String, String> body = new LinkedHashMap<>();
+        body.put("error", exception.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

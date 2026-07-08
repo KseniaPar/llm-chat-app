@@ -1,6 +1,10 @@
 app:
   openrouter:
     api-key: your-openrouter-api-key-here
+  local-llm:
+    enabled: true
+    base-url: http://localhost:11434
+    model: qwen2.5:14b
   mcp:
     enabled: true
     # Set to false if Node.js / npx is not installed (backend will start without MCP)

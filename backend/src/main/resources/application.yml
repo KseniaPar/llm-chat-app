@@ -275,6 +275,13 @@ app:
     max-tokens: 256
     stop-marker: "[DONE]"
     default-max-turns: 8
+  local-llm:
+    enabled: true
+    base-url: http://localhost:11434
+    model: qwen2.5:14b
+    temperature: 0.5
+    max-tokens: 512
+    request-timeout: 120s
 
 server:
   port: 8080
