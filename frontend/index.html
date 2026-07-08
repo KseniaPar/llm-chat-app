@@ -3,67 +3,50 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 25 — RAG Chat + Task Memory</title>
+  <title>День 26 — Локальная LLM (Ollama)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/rag.css">
 </head>
 <body>
-  <main class="rag-app rag-app--chat">
+  <main class="rag-app rag-app--local-llm">
     <header class="rag-app__header">
-      <p class="rag-app__badge">Day 25</p>
-      <h1 class="rag-app__title">Мини-чат с RAG и памятью задачи</h1>
-      <p class="rag-app__desc">Мультитurn диалог · RAG + sources/quotes каждый ход · task memory sidebar</p>
+      <p class="rag-app__badge">Day 26</p>
+      <h1 class="rag-app__title">Локальная LLM (Ollama)</h1>
+      <p id="demo-description" class="rag-app__desc">Проверка CLI и HTTP API · запросы разной сложности</p>
     </header>
 
-    <div class="chat-layout">
-      <section class="chat-panel">
-        <div class="chat-panel__toolbar">
-          <button id="rag-chat-reset-btn" class="rag-panel__btn" type="button">Новый диалог</button>
-          <span id="rag-chat-session-label" class="chat-session-label"></span>
+    <section class="demo-card local-llm-status-card">
+      <h2 class="demo-card__title">Статус Ollama</h2>
+      <div class="local-llm-status">
+        <span id="status-indicator" class="status-dot status-dot--offline" aria-hidden="true"></span>
+        <div>
+          <p id="status-message" class="local-llm-status__message">Проверка…</p>
+          <p id="status-meta" class="local-llm-status__meta"></p>
         </div>
+        <button id="status-refresh-btn" class="rag-panel__btn" type="button">Обновить</button>
+      </div>
+    </section>
 
-        <div id="rag-chat-messages" class="chat-messages" aria-live="polite"></div>
+    <section class="demo-card">
+      <h2 class="demo-card__title">Произвольный запрос</h2>
+      <form id="custom-chat-form" class="chat-input-form">
+        <textarea id="custom-prompt" class="chat-input" rows="3" placeholder="Введите prompt для локальной модели…"></textarea>
+        <button id="custom-send-btn" class="rag-panel__btn rag-panel__btn--primary" type="submit">Отправить в Ollama</button>
+      </form>
+      <div id="custom-result" class="local-llm-result" hidden></div>
+    </section>
 
-        <form id="rag-chat-form" class="chat-input-form">
-          <textarea id="rag-chat-input" class="chat-input" rows="2" placeholder="Задайте вопрос по «Основам православия»…"></textarea>
-          <button id="rag-chat-send-btn" class="rag-panel__btn rag-panel__btn--primary" type="submit">Отправить</button>
-        </form>
-        <p id="rag-chat-status" class="demo-status" aria-live="polite"></p>
-      </section>
+    <section class="demo-card demo-card--actions">
+      <h2 id="scenarios-title" class="demo-card__title">Тестовые запросы</h2>
+      <div class="local-llm-actions">
+        <button id="run-all-btn" class="rag-panel__btn rag-panel__btn--primary" type="button">Запустить все</button>
+      </div>
+      <div id="scenarios-list" class="local-llm-scenarios"></div>
+    </section>
 
-      <aside class="chat-sidebar">
-        <section class="memory-panel">
-          <h2 class="memory-panel__title">Task memory</h2>
-          <dl class="memory-dl">
-            <div>
-              <dt>Цель диалога</dt>
-              <dd id="memory-goal">—</dd>
-            </div>
-            <div>
-              <dt>Уточнения</dt>
-              <dd id="memory-clarifications"><span class="memory-empty">—</span></dd>
-            </div>
-            <div>
-              <dt>Зафиксированные термины</dt>
-              <dd id="memory-terms"><span class="memory-empty">—</span></dd>
-            </div>
-          </dl>
-        </section>
-
-        <section class="scenarios-panel">
-          <h2 class="scenarios-panel__title">Демо-сценарии</h2>
-          <div class="demo-controls">
-            <p id="demo-progress" class="demo-progress">Загрузка сценариев…</p>
-            <div id="demo-play-buttons" class="demo-controls__buttons"></div>
-            <button id="demo-stop-btn" class="rag-panel__btn demo-stop-btn" type="button" hidden>⏹ Остановить</button>
-            <p class="demo-controls__hint">Автовоспроизведение с паузами для записи экрана: набор текста → ~1.2 с → ответ → ~3.5 с.</p>
-          </div>
-          <div id="scenarios-list" class="scenarios-list"></div>
-        </section>
-      </aside>
-    </div>
+    <p id="local-llm-status" class="demo-status" aria-live="polite"></p>
   </main>
 
   <script type="module" src="/js/app.js"></script>
