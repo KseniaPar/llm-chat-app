@@ -14,5 +14,6 @@ public record RagRetrievalMetaDto(
         int droppedCount,
         double minSimilarity,
         List<Double> scoresBefore,
-        List<Double> scoresAfter) {
+        List<Double> scoresAfter,
+        String embeddingSource) {
 }

@@ -11,6 +11,11 @@ import com.example.llmchat.dto.RagEvalResponse;
 import com.example.llmchat.dto.RagEvalValidationResponse;
 import com.example.llmchat.dto.RagModeCompareResponse;
 import com.example.llmchat.dto.RagModeEvalResponse;
+import com.example.llmchat.dto.RagLocalDemoResponse;
+import com.example.llmchat.dto.RagLocalDemoRunResponse;
+import com.example.llmchat.dto.RagLocalDemoScenarioResultDto;
+import com.example.llmchat.dto.RagLlmCompareResponse;
+import com.example.llmchat.dto.RagLlmEvalResponse;
 import com.example.llmchat.dto.RagIndexRequest;
 import com.example.llmchat.dto.RagIndexResponse;
 import com.example.llmchat.dto.RagQueryCompareResponse;
@@ -23,8 +28,12 @@ import com.example.llmchat.rag.RagChatService;
 import com.example.llmchat.rag.RagCorpusLoader;
 import com.example.llmchat.rag.RagDemoService;
 import com.example.llmchat.rag.RagEvalService;
-import com.example.llmchat.rag.RagIndexRepository;
+import com.example.llmchat.rag.RagLocalIndexService;
+import com.example.llmchat.rag.RagIndexStore;
 import com.example.llmchat.rag.RagIndexingService;
+import com.example.llmchat.rag.RagLlmEvalService;
+import com.example.llmchat.rag.RagLlmProvider;
+import com.example.llmchat.rag.RagLocalDemoService;
 import com.example.llmchat.rag.RagQueryService;
 import com.example.llmchat.rag.RagScenarioLoader;
 import com.example.llmchat.rag.RagRetrievalMode;
@@ -32,6 +41,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -50,31 +60,85 @@ public class RagController {
     private static final Logger log = LoggerFactory.getLogger(RagController.class);
 
     private final RagIndexingService indexingService;
-    private final RagIndexRepository indexRepository;
+    private final RagIndexStore indexStore;
     private final RagCorpusLoader corpusLoader;
     private final RagQueryService queryService;
     private final RagDemoService demoService;
     private final RagEvalService evalService;
     private final RagChatService chatService;
     private final RagScenarioLoader scenarioLoader;
+    private final RagLlmEvalService llmEvalService;
+    private final RagLocalDemoService localDemoService;
+    private final RagLocalIndexService localIndexService;
 
     public RagController(
             RagIndexingService indexingService,
-            RagIndexRepository indexRepository,
+            RagIndexStore indexStore,
             RagCorpusLoader corpusLoader,
             RagQueryService queryService,
             RagDemoService demoService,
             RagEvalService evalService,
             RagChatService chatService,
-            RagScenarioLoader scenarioLoader) {
+            RagScenarioLoader scenarioLoader,
+            RagLlmEvalService llmEvalService,
+            RagLocalDemoService localDemoService,
+            RagLocalIndexService localIndexService) {
         this.indexingService = indexingService;
-        this.indexRepository = indexRepository;
+        this.indexStore = indexStore;
         this.corpusLoader = corpusLoader;
         this.queryService = queryService;
         this.demoService = demoService;
         this.evalService = evalService;
         this.chatService = chatService;
         this.scenarioLoader = scenarioLoader;
+        this.llmEvalService = llmEvalService;
+        this.localDemoService = localDemoService;
+        this.localIndexService = localIndexService;
+    }
+
+    @GetMapping("/local/demo")
+    public RagLocalDemoResponse localDemo() {
+        return localDemoService.buildDemo();
+    }
+
+    @PostMapping("/local/demo/run")
+    public RagLocalDemoRunResponse runLocalDemo() {
+        log.info("POST /api/rag/local/demo/run");
+        try {
+            return localDemoService.runAll();
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        }
+    }
+
+    @PostMapping("/local/index")
+    public RagIndexResponse buildLocalIndex(@RequestBody(required = false) RagIndexRequest request) {
+        ChunkingStrategy strategy = request != null && request.strategy() != null
+                ? request.strategy()
+                : ChunkingStrategy.STRUCTURE;
+        log.info("POST /api/rag/local/index strategy={}", strategy);
+        try {
+            return RagIndexResponse.from(localIndexService.buildLocalIndex(strategy));
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        }
+    }
+
+    @GetMapping("/local/index/status")
+    public RagLocalIndexService.LocalIndexStatus localIndexStatus() {
+        return localIndexService.status();
+    }
+
+    @PostMapping("/local/demo/run/{scenarioId}")
+    public RagLocalDemoScenarioResultDto runLocalDemoScenario(@PathVariable int scenarioId) {
+        log.info("POST /api/rag/local/demo/run/{}", scenarioId);
+        try {
+            return localDemoService.runScenario(scenarioId);
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        }
     }
 
     @PostMapping("/index")
@@ -103,7 +167,7 @@ public class RagController {
         return new RagStatsResponse(
                 corpus.documentCount(),
                 corpus.estimatedPages(),
-                indexRepository.allStats());
+                indexStore.cloud().allStats());
     }
 
     @GetMapping("/index/demo")
@@ -119,10 +183,26 @@ public class RagController {
         ChunkingStrategy strategy = request.strategy() != null ? request.strategy() : ChunkingStrategy.STRUCTURE;
         boolean useRag = request.useRag() == null || request.useRag();
         RagRetrievalMode mode = request.mode() != null ? request.mode() : RagRetrievalMode.FILTERED;
-        log.info("POST /api/rag/query useRag={} strategy={} mode={}", useRag, strategy, mode);
+        RagLlmProvider llmProvider = request.llmProvider() != null ? request.llmProvider() : RagLlmProvider.LOCAL;
+        log.info("POST /api/rag/query useRag={} strategy={} mode={} llm={}", useRag, strategy, mode, llmProvider);
         try {
             return queryService.query(
-                    request.question(), useRag, strategy, request.topK(), mode, request.minSimilarity());
+                    request.question(), useRag, strategy, request.topK(), mode, request.minSimilarity(), llmProvider);
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        }
+    }
+
+    @PostMapping("/query/llm/compare")
+    public RagLlmCompareResponse queryLlmCompare(@RequestBody RagQueryRequest request) {
+        if (request.question() == null || request.question().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "question is required");
+        }
+        ChunkingStrategy strategy = request.strategy() != null ? request.strategy() : ChunkingStrategy.STRUCTURE;
+        log.info("POST /api/rag/query/llm/compare strategy={}", strategy);
+        try {
+            return queryService.compareLlmProviders(
+                    request.question(), strategy, request.topK(), request.minSimilarity());
         } catch (IllegalStateException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
         }
@@ -160,6 +240,21 @@ public class RagController {
     @GetMapping("/eval/questions")
     public List<RagEvalQuestionDto> evalQuestions() {
         return evalService.questions();
+    }
+
+    @PostMapping("/eval/llm/compare")
+    public RagLlmEvalResponse runLlmEval(@RequestBody(required = false) RagQueryRequest request) {
+        ChunkingStrategy strategy = request != null && request.strategy() != null
+                ? request.strategy()
+                : ChunkingStrategy.STRUCTURE;
+        Integer topK = request != null ? request.topK() : null;
+        Double minSimilarity = request != null ? request.minSimilarity() : null;
+        log.info("POST /api/rag/eval/llm/compare strategy={}", strategy);
+        try {
+            return llmEvalService.runLlmCompareEval(strategy, topK, minSimilarity);
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        }
     }
 
     @PostMapping("/eval/run")

@@ -14,7 +14,7 @@ import java.util.Optional;
 public class RagDemoService {
 
     private final RagCorpusLoader corpusLoader;
-    private final RagIndexRepository indexRepository;
+    private final RagIndexStore indexStore;
     private final String indexDbPath;
     private final String embeddingModel;
     private final int fixedChunkSize;
@@ -23,14 +23,14 @@ public class RagDemoService {
 
     public RagDemoService(
             RagCorpusLoader corpusLoader,
-            RagIndexRepository indexRepository,
+            RagIndexStore indexStore,
             @Value("${app.rag.index-db:data/rag-index.db}") String indexDbPath,
-            @Value("${app.rag.embedding-model}") String embeddingModel,
+            @Value("${app.rag.cloud.embedding-model:openai/text-embedding-3-small}") String embeddingModel,
             @Value("${app.rag.fixed-chunk-size:1200}") int fixedChunkSize,
             @Value("${app.rag.chunk-overlap:200}") int chunkOverlap,
             @Value("${app.rag.embedding-batch-size:64}") int embeddingBatchSize) {
         this.corpusLoader = corpusLoader;
-        this.indexRepository = indexRepository;
+        this.indexStore = indexStore;
         this.indexDbPath = Paths.get(indexDbPath).toAbsolutePath().normalize().toString();
         this.embeddingModel = embeddingModel;
         this.fixedChunkSize = fixedChunkSize;
@@ -72,6 +72,7 @@ public class RagDemoService {
     }
 
     private RagStrategyDemoDto buildStrategyDemo(ChunkingStrategy strategy) {
+        var indexRepository = indexStore.cloud();
         Optional<RagIndexRepository.StrategyStats> stats = indexRepository.statsFor(strategy);
         List<RagIndexRepository.ChunkMetaRow> samples = indexRepository.sampleChunkMetaSpread(strategy);
         int dimensions = indexRepository.embeddingDimensions(strategy).orElse(0);

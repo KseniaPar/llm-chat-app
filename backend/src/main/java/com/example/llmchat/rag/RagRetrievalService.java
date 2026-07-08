@@ -16,7 +16,7 @@ import java.util.Set;
 public class RagRetrievalService {
 
     private final EmbeddingService embeddingService;
-    private final RagIndexRepository indexRepository;
+    private final RagIndexStore indexStore;
     private final QueryRewriteService queryRewriteService;
     private final RagChunkQualityFilter chunkQualityFilter;
     private final int defaultTopK;
@@ -26,7 +26,7 @@ public class RagRetrievalService {
 
     public RagRetrievalService(
             EmbeddingService embeddingService,
-            RagIndexRepository indexRepository,
+            RagIndexStore indexStore,
             QueryRewriteService queryRewriteService,
             RagChunkQualityFilter chunkQualityFilter,
             @Value("${app.rag.default-top-k:5}") int defaultTopK,
@@ -34,7 +34,7 @@ public class RagRetrievalService {
             @Value("${app.rag.min-similarity:0.65}") double defaultMinSimilarity,
             @Value("${app.rag.keyword-filter-floor:0.18}") double keywordFilterFloor) {
         this.embeddingService = embeddingService;
-        this.indexRepository = indexRepository;
+        this.indexStore = indexStore;
         this.queryRewriteService = queryRewriteService;
         this.chunkQualityFilter = chunkQualityFilter;
         this.defaultTopK = defaultTopK;
@@ -43,8 +43,8 @@ public class RagRetrievalService {
         this.keywordFilterFloor = keywordFilterFloor;
     }
 
-    public List<ScoredChunk> search(String query, ChunkingStrategy strategy, Integer topK) {
-        return retrieve(query, strategy, RagRetrievalMode.RAW, topK, null).chunks();
+    public List<ScoredChunk> search(String query, ChunkingStrategy strategy, Integer topK, RagStack stack) {
+        return retrieve(query, strategy, RagRetrievalMode.RAW, topK, null, stack).chunks();
     }
 
     public RetrievalResult retrieve(
@@ -52,7 +52,8 @@ public class RagRetrievalService {
             ChunkingStrategy strategy,
             RagRetrievalMode mode,
             Integer topK,
-            Double minSimilarity) {
+            Double minSimilarity,
+            RagStack stack) {
         RagRetrievalMode effectiveMode = mode != null ? mode : RagRetrievalMode.RAW;
         int k = topK != null ? topK : defaultTopK;
         double threshold = minSimilarity != null ? minSimilarity : defaultMinSimilarity;
@@ -60,13 +61,15 @@ public class RagRetrievalService {
 
         String rewrittenQuery = null;
         String searchQuery = originalQuery;
-        if (effectiveMode == RagRetrievalMode.REWRITE_FILTERED) {
+        if (effectiveMode == RagRetrievalMode.REWRITE_FILTERED && stack == RagStack.CLOUD) {
             rewrittenQuery = queryRewriteService.rewrite(originalQuery);
             searchQuery = rewrittenQuery;
         }
 
         List<String> keywords = RagKeywords.merge(originalQuery, searchQuery);
-        List<ScoredChunk> ranked = scoreAll(searchQuery, strategy, keywords);
+        ScoreAllResult scored = scoreAll(searchQuery, strategy, keywords, stack);
+        List<ScoredChunk> ranked = scored.chunks();
+        String embeddingSource = scored.embeddingSource();
         List<ScoredChunk> pool = enrichPool(ranked, poolSize, keywords);
         List<Double> scoresBefore = pool.stream().map(ScoredChunk::semanticScore).toList();
 
@@ -83,7 +86,8 @@ public class RagRetrievalService {
                     0,
                     threshold,
                     scoresBefore,
-                    selected.stream().map(ScoredChunk::semanticScore).toList());
+                    selected.stream().map(ScoredChunk::semanticScore).toList(),
+                    embeddingSource);
         }
 
         List<ScoredChunk> passing = pool.stream()
@@ -104,7 +108,8 @@ public class RagRetrievalService {
                 dropped,
                 threshold,
                 scoresBefore,
-                filtered.stream().map(ScoredChunk::semanticScore).toList());
+                filtered.stream().map(ScoredChunk::semanticScore).toList(),
+                embeddingSource);
     }
 
     private boolean passesFilter(ScoredChunk chunk, List<String> keywords, double threshold) {
@@ -191,8 +196,12 @@ public class RagRetrievalService {
         return content == null ? "" : content.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
     }
 
-    private List<ScoredChunk> scoreAll(String query, ChunkingStrategy strategy, List<String> keywords) {
-        float[] queryVector = embeddingService.embed(query);
+    private ScoreAllResult scoreAll(String query, ChunkingStrategy strategy, List<String> keywords, RagStack stack) {
+        EmbeddingService.EmbedResult embedResult = embeddingService.embedForQuery(query, stack);
+        boolean keywordOnly = embedResult.source() == EmbeddingService.EmbeddingSource.KEYWORD_FALLBACK;
+        float[] queryVector = embedResult.vector();
+
+        RagIndexRepository indexRepository = indexStore.forStack(stack);
         List<RagIndexRepository.IndexedChunk> chunks = indexRepository.loadChunks(strategy);
         if (chunks.isEmpty()) {
             throw new IllegalStateException("Индекс пуст — сначала выполните POST /api/rag/index");
@@ -202,12 +211,27 @@ public class RagRetrievalService {
             if (chunkQualityFilter.isBibliographyOrNavigation(chunk.section(), chunk.content())) {
                 continue;
             }
-            double semanticScore = EmbeddingService.cosineSimilarity(queryVector, chunk.embedding());
-            double rankScore = applyKeywordBoost(semanticScore, chunk.content(), keywords);
-            scored.add(new ScoredChunk(chunk, semanticScore, rankScore));
+            double semanticScore = keywordOnly
+                    ? keywordOnlyScore(chunk.content(), keywords)
+                    : applyKeywordBoost(
+                            EmbeddingService.cosineSimilarity(queryVector, chunk.embedding()),
+                            chunk.content(),
+                            keywords);
+            scored.add(new ScoredChunk(chunk, semanticScore, semanticScore));
         }
         scored.sort(Comparator.comparingDouble(ScoredChunk::semanticScore).reversed());
-        return scored;
+        return new ScoreAllResult(scored, embedResult.source().name());
+    }
+
+    private record ScoreAllResult(List<ScoredChunk> chunks, String embeddingSource) {
+    }
+
+    private static double keywordOnlyScore(String content, List<String> keywords) {
+        int matches = RagKeywords.countMatches(content, keywords);
+        if (matches == 0) {
+            return 0.05;
+        }
+        return Math.min(0.92, 0.45 + 0.12 * matches);
     }
 
     private static double applyKeywordBoost(double semanticScore, String content, List<String> keywords) {
@@ -230,7 +254,8 @@ public class RagRetrievalService {
             int droppedCount,
             double minSimilarity,
             List<Double> scoresBefore,
-            List<Double> scoresAfter) {
+            List<Double> scoresAfter,
+            String embeddingSource) {
     }
 
     public record ScoredChunk(RagIndexRepository.IndexedChunk chunk, double semanticScore, double score) {

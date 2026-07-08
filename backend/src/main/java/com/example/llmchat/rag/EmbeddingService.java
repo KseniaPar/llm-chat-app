@@ -1,19 +1,24 @@
 package com.example.llmchat.rag;
 
+import com.example.llmchat.localllm.LocalLlmService;
+import com.example.llmchat.localllm.OllamaHttpClient;
+import com.example.llmchat.localllm.OllamaHttpException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,42 +29,101 @@ public class EmbeddingService {
 
     private static final Logger log = LoggerFactory.getLogger(EmbeddingService.class);
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    public enum EmbeddingSource {
+        OLLAMA,
+        OPENROUTER,
+        KEYWORD_FALLBACK
+    }
+
+    public record EmbedResult(float[] vector, EmbeddingSource source, String note) {
+        public static EmbedResult of(float[] vector, EmbeddingSource source) {
+            return new EmbedResult(vector, source, null);
+        }
+
+        public static EmbedResult keywordFallback(String note) {
+            return new EmbedResult(new float[0], EmbeddingSource.KEYWORD_FALLBACK, note);
+        }
+    }
+
+    private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final OllamaHttpClient ollamaHttpClient;
+    private final LocalLlmService localLlmService;
     private final String apiKey;
     private final String embeddingsUrl;
-    private final String model;
+    private final String cloudModel;
+    private final String localModel;
     private final int batchSize;
+    private final boolean cloudFallbackOnFailure;
 
     public EmbeddingService(
             ObjectMapper objectMapper,
+            RestTemplateBuilder restTemplateBuilder,
+            OllamaHttpClient ollamaHttpClient,
+            LocalLlmService localLlmService,
             @Value("${app.openrouter.api-key}") String apiKey,
             @Value("${app.openrouter.base-url}") String baseUrl,
-            @Value("${app.rag.embedding-model:openai/text-embedding-3-small}") String model,
-            @Value("${app.rag.embedding-batch-size:64}") int batchSize) {
+            @Value("${app.rag.cloud.embedding-model:openai/text-embedding-3-small}") String cloudModel,
+            @Value("${app.rag.local.embedding-model:nomic-embed-text}") String localModel,
+            @Value("${app.rag.embedding-batch-size:64}") int batchSize,
+            @Value("${app.rag.embedding-timeout:30s}") Duration embeddingTimeout,
+            @Value("${app.rag.embedding-fallback-on-failure:true}") boolean cloudFallbackOnFailure) {
         this.objectMapper = objectMapper;
+        this.ollamaHttpClient = ollamaHttpClient;
+        this.localLlmService = localLlmService;
         this.apiKey = apiKey;
         this.embeddingsUrl = baseUrl + "/v1/embeddings";
-        this.model = model;
+        this.cloudModel = cloudModel;
+        this.localModel = localModel;
         this.batchSize = Math.max(1, batchSize);
+        this.cloudFallbackOnFailure = cloudFallbackOnFailure;
+        this.restTemplate = restTemplateBuilder
+                .setConnectTimeout(embeddingTimeout)
+                .setReadTimeout(embeddingTimeout)
+                .build();
     }
 
-    public float[] embed(String text) {
-        List<float[]> batch = embedBatch(List.of(text));
-        return batch.isEmpty() ? new float[0] : batch.get(0);
+    public String localModel() {
+        return localModel;
     }
 
-    public List<float[]> embedBatch(List<String> texts) {
+    public String cloudModel() {
+        return cloudModel;
+    }
+
+    public EmbedResult embedForQuery(String text, RagStack stack) {
+        if (text == null || text.isBlank()) {
+            return EmbedResult.keywordFallback("Пустой запрос.");
+        }
+        if (stack == RagStack.LOCAL) {
+            return embedLocal(text);
+        }
+        return embedCloudQuery(text);
+    }
+
+    public List<float[]> embedBatch(List<String> texts, RagStack stack) {
         if (texts.isEmpty()) {
             return List.of();
         }
-        ensureApiKeyConfigured();
+        if (stack == RagStack.LOCAL) {
+            ensureLocalEmbeddingReady();
+            List<float[]> all = new ArrayList<>(texts.size());
+            for (int start = 0; start < texts.size(); start += batchSize) {
+                int end = Math.min(start + batchSize, texts.size());
+                log.info("Local embedding batch {}-{}/{}", start + 1, end, texts.size());
+                for (int i = start; i < end; i++) {
+                    all.add(ollamaHttpClient.embed(texts.get(i), localModel));
+                }
+            }
+            return all;
+        }
+        ensureCloudApiKeyConfigured();
         List<float[]> all = new ArrayList<>(texts.size());
         for (int start = 0; start < texts.size(); start += batchSize) {
             int end = Math.min(start + batchSize, texts.size());
             List<String> batch = texts.subList(start, end);
-            log.info("Embedding batch {}-{}/{}", start + 1, end, texts.size());
-            all.addAll(requestEmbeddings(batch));
+            log.info("Cloud embedding batch {}-{}/{}", start + 1, end, texts.size());
+            all.addAll(requestOpenRouterEmbeddings(batch));
         }
         if (all.size() != texts.size()) {
             throw new IllegalStateException(
@@ -68,15 +132,65 @@ public class EmbeddingService {
         return all;
     }
 
-    private void ensureApiKeyConfigured() {
-        if (apiKey == null || apiKey.isBlank()) {
-            throw new IllegalStateException("OPENROUTER_API_KEY не задан — нужен для индексации");
+    public float[] embed(String text) {
+        return embedBatch(List.of(text), RagStack.CLOUD).get(0);
+    }
+
+    private EmbedResult embedLocal(String text) {
+        ensureLocalEmbeddingReady();
+        try {
+            return EmbedResult.of(ollamaHttpClient.embed(text, localModel), EmbeddingSource.OLLAMA);
+        } catch (OllamaHttpException exception) {
+            throw new IllegalStateException(
+                    "Локальный embedding недоступен: " + exception.getMessage()
+                            + ". Выполните: ollama pull " + localModel,
+                    exception);
         }
     }
 
-    private List<float[]> requestEmbeddings(List<String> texts) {
+    private EmbedResult embedCloudQuery(String text) {
+        try {
+            ensureCloudApiKeyConfigured();
+            return EmbedResult.of(requestOpenRouterEmbeddings(List.of(text)).get(0), EmbeddingSource.OPENROUTER);
+        } catch (IllegalStateException exception) {
+            if (!cloudFallbackOnFailure) {
+                throw exception;
+            }
+            String note = "OpenRouter embeddings недоступен — keyword-only retrieval: "
+                    + shorten(exception.getMessage());
+            log.warn(note);
+            return EmbedResult.keywordFallback(note);
+        }
+    }
+
+    private void ensureLocalEmbeddingReady() {
+        var status = localLlmService.checkStatus();
+        if (!status.online()) {
+            throw new IllegalStateException("Ollama недоступен: " + status.message());
+        }
+        boolean modelAvailable = status.installedModels().stream().anyMatch(this::matchesLocalEmbedModel);
+        if (!modelAvailable) {
+            throw new IllegalStateException(
+                    "Модель embedding " + localModel + " не найдена в Ollama. Выполните: ollama pull " + localModel);
+        }
+    }
+
+    private boolean matchesLocalEmbedModel(String installedName) {
+        if (installedName == null || installedName.isBlank()) {
+            return false;
+        }
+        return installedName.equals(localModel) || installedName.startsWith(localModel + ":");
+    }
+
+    private void ensureCloudApiKeyConfigured() {
+        if (apiKey == null || apiKey.isBlank() || "local-llm-not-used".equals(apiKey)) {
+            throw new IllegalStateException("OPENROUTER_API_KEY не задан — нужен для облачного RAG.");
+        }
+    }
+
+    private List<float[]> requestOpenRouterEmbeddings(List<String> texts) {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", model);
+        body.put("model", cloudModel);
         body.put("input", texts);
 
         HttpHeaders headers = new HttpHeaders();
@@ -89,13 +203,16 @@ public class EmbeddingService {
                     HttpMethod.POST,
                     new HttpEntity<>(body, headers),
                     String.class);
-            return parseEmbeddings(response.getBody(), texts.size());
+            return parseOpenRouterEmbeddings(response.getBody(), texts.size());
         } catch (RestClientException exception) {
-            throw new IllegalStateException("Embedding API failed: " + exception.getMessage(), exception);
+            throw new IllegalStateException(
+                    "Embedding API failed: " + exception.getMessage()
+                            + ". Проверьте доступ к openrouter.ai.",
+                    exception);
         }
     }
 
-    private List<float[]> parseEmbeddings(String json, int expectedCount) {
+    private List<float[]> parseOpenRouterEmbeddings(String json, int expectedCount) {
         try {
             JsonNode root = objectMapper.readTree(json);
             JsonNode error = root.path("error");
@@ -109,13 +226,7 @@ public class EmbeddingService {
             }
             float[][] ordered = new float[expectedCount][];
             for (JsonNode item : data) {
-                if (!item.has("index")) {
-                    throw new IllegalStateException("Embedding API response missing index field");
-                }
                 int index = item.path("index").asInt();
-                if (index < 0 || index >= expectedCount) {
-                    throw new IllegalStateException("Embedding API returned unexpected index: " + index);
-                }
                 JsonNode embedding = item.path("embedding");
                 float[] vector = new float[embedding.size()];
                 for (int i = 0; i < embedding.size(); i++) {
@@ -136,6 +247,13 @@ public class EmbeddingService {
         } catch (Exception exception) {
             throw new IllegalStateException("Failed to parse embeddings response", exception);
         }
+    }
+
+    private static String shorten(String message) {
+        if (message == null || message.isBlank()) {
+            return "unknown error";
+        }
+        return message.length() > 120 ? message.substring(0, 120) + "…" : message;
     }
 
     public static double cosineSimilarity(float[] a, float[] b) {
