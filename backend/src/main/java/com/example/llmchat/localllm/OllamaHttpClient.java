@@ -71,10 +71,33 @@ public class OllamaHttpClient {
         }
     }
 
+    public record ChatMessage(String role, String content) {
+    }
+
     public ChatResult chat(String prompt, String model, double temperature, int maxTokens) {
+        return chatMessages(List.of(new ChatMessage("user", prompt)), model, temperature, maxTokens);
+    }
+
+    public ChatResult chatMessages(List<ChatMessage> messages, String model, double temperature, int maxTokens) {
+        if (messages == null || messages.isEmpty()) {
+            throw new IllegalArgumentException("messages must not be empty");
+        }
+
+        List<Map<String, String>> ollamaMessages = messages.stream()
+                .filter(message -> message != null
+                        && message.content() != null
+                        && !message.content().isBlank())
+                .map(message -> Map.of(
+                        "role", normalizeRole(message.role()),
+                        "content", message.content().trim()))
+                .toList();
+        if (ollamaMessages.isEmpty()) {
+            throw new IllegalArgumentException("messages must contain at least one non-blank message");
+        }
+
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
-        body.put("messages", List.of(Map.of("role", "user", "content", prompt)));
+        body.put("messages", ollamaMessages);
         body.put("stream", false);
         body.put("options", Map.of(
                 "temperature", temperature,
@@ -98,6 +121,16 @@ public class OllamaHttpClient {
         } catch (RestClientException exception) {
             throw new OllamaHttpException(502, "Ollama недоступен: " + exception.getMessage());
         }
+    }
+
+    private String normalizeRole(String role) {
+        if (role == null || role.isBlank()) {
+            return "user";
+        }
+        return switch (role.toLowerCase()) {
+            case "system", "assistant", "user" -> role.toLowerCase();
+            default -> "user";
+        };
     }
 
     public String configuredModel() {

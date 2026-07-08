@@ -3,50 +3,58 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 26 — Локальная LLM (Ollama)</title>
+  <title>День 27 — Локальная LLM в приложении</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/rag.css">
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <main class="rag-app rag-app--local-llm">
-    <header class="rag-app__header">
-      <p class="rag-app__badge">Day 26</p>
-      <h1 class="rag-app__title">Локальная LLM (Ollama)</h1>
-      <p id="demo-description" class="rag-app__desc">Проверка CLI и HTTP API · запросы разной сложности</p>
-    </header>
-
-    <section class="demo-card local-llm-status-card">
-      <h2 class="demo-card__title">Статус Ollama</h2>
-      <div class="local-llm-status">
-        <span id="status-indicator" class="status-dot status-dot--offline" aria-hidden="true"></span>
-        <div>
-          <p id="status-message" class="local-llm-status__message">Проверка…</p>
-          <p id="status-meta" class="local-llm-status__meta"></p>
+  <main class="app">
+    <section class="chat-shell chat-shell--local-llm">
+      <header class="chat-header">
+        <div class="chat-header__avatar chat-header__avatar--local" aria-hidden="true">🦙</div>
+        <div class="chat-header__info">
+          <p class="chat-header__badge">Day 27</p>
+          <h1>Учебный ассистент</h1>
+          <p id="local-model-label" class="chat-header__subtitle">Локальная LLM · загрузка…</p>
         </div>
-        <button id="status-refresh-btn" class="rag-panel__btn" type="button">Обновить</button>
+        <div class="local-llm-header-status">
+          <span id="status-indicator" class="status-dot status-dot--offline" aria-hidden="true"></span>
+          <p id="status-message" class="local-llm-header-status__text">Проверка Ollama…</p>
+        </div>
+        <span id="loading" class="chat-header__status hidden" aria-live="polite">
+          <span class="typing-dots"><span></span><span></span><span></span></span>
+          Ollama генерирует…
+        </span>
+        <button id="new-dialog-btn" class="chat-header__action" type="button">Новый диалог</button>
+      </header>
+
+      <div id="messages" class="messages" aria-live="polite">
+        <div class="messages-empty">
+          <div class="messages-empty__icon" aria-hidden="true">💬</div>
+          <p>Напишите сообщение — ответ придёт от локальной модели через Ollama</p>
+          <p class="messages-empty__hint">Облачные модели не используются</p>
+        </div>
       </div>
-    </section>
 
-    <section class="demo-card">
-      <h2 class="demo-card__title">Произвольный запрос</h2>
-      <form id="custom-chat-form" class="chat-input-form">
-        <textarea id="custom-prompt" class="chat-input" rows="3" placeholder="Введите prompt для локальной модели…"></textarea>
-        <button id="custom-send-btn" class="rag-panel__btn rag-panel__btn--primary" type="submit">Отправить в Ollama</button>
-      </form>
-      <div id="custom-result" class="local-llm-result" hidden></div>
-    </section>
+      <div id="error" class="error hidden" role="alert"></div>
 
-    <section class="demo-card demo-card--actions">
-      <h2 id="scenarios-title" class="demo-card__title">Тестовые запросы</h2>
-      <div class="local-llm-actions">
-        <button id="run-all-btn" class="rag-panel__btn rag-panel__btn--primary" type="button">Запустить все</button>
-      </div>
-      <div id="scenarios-list" class="local-llm-scenarios"></div>
+      <footer class="composer">
+        <textarea
+          id="prompt"
+          class="composer__input"
+          rows="1"
+          placeholder="Спросите об учебных материалах…"
+        ></textarea>
+        <button id="send-btn" class="composer__send" type="button" aria-label="Отправить">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M22 2 11 13"></path>
+            <path d="M22 2 15 22 11 13 2 9 22 2"></path>
+          </svg>
+        </button>
+      </footer>
     </section>
-
-    <p id="local-llm-status" class="demo-status" aria-live="polite"></p>
   </main>
 
   <script type="module" src="/js/app.js"></script>
