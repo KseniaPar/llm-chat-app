@@ -29,7 +29,7 @@ spring:
 
 app:
   mcp:
-    enabled: true
+    enabled: false
     sandbox:
       relative-path: data/mcp-sandbox
   scheduler:
@@ -40,7 +40,7 @@ app:
     jwt-secret: ${JWT_SECRET:change-me-in-production-use-long-random-string}
     jwt-expiration-ms: 86400000
   openrouter:
-    api-key: ${OPENROUTER_API_KEY}
+    api-key: ${OPENROUTER_API_KEY:local-llm-not-used}
     base-url: https://openrouter.ai/api
     model: openai/gpt-4o-mini
   agent:
@@ -277,6 +277,7 @@ app:
     default-max-turns: 8
   local-llm:
     enabled: true
+    integrated: true
     base-url: http://localhost:11434
     model: qwen2.5:14b
     temperature: 0.5
