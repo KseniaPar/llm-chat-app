@@ -15,7 +15,7 @@ public class RagIndexingService {
     private final FixedSizeChunker fixedSizeChunker;
     private final StructureAwareChunker structureAwareChunker;
     private final EmbeddingService embeddingService;
-    private final RagIndexRepository indexRepository;
+    private final RagIndexStore indexStore;
     private final int fixedChunkSize;
     private final int chunkOverlap;
 
@@ -24,19 +24,24 @@ public class RagIndexingService {
             FixedSizeChunker fixedSizeChunker,
             StructureAwareChunker structureAwareChunker,
             EmbeddingService embeddingService,
-            RagIndexRepository indexRepository,
+            RagIndexStore indexStore,
             @Value("${app.rag.fixed-chunk-size:1200}") int fixedChunkSize,
             @Value("${app.rag.chunk-overlap:200}") int chunkOverlap) {
         this.corpusLoader = corpusLoader;
         this.fixedSizeChunker = fixedSizeChunker;
         this.structureAwareChunker = structureAwareChunker;
         this.embeddingService = embeddingService;
-        this.indexRepository = indexRepository;
+        this.indexStore = indexStore;
         this.fixedChunkSize = fixedChunkSize;
         this.chunkOverlap = chunkOverlap;
     }
 
     public IndexResult index(ChunkingStrategy strategy) {
+        return index(strategy, RagStack.CLOUD);
+    }
+
+    public IndexResult index(ChunkingStrategy strategy, RagStack stack) {
+        RagIndexRepository indexRepository = indexStore.forStack(stack);
         List<RagDocument> documents = corpusLoader.loadAll();
         if (documents.isEmpty()) {
             throw new IllegalStateException("Corpus is empty — add files to rag-corpus/");
@@ -50,7 +55,7 @@ public class RagIndexingService {
                 continue;
             }
             List<String> texts = chunks.stream().map(RagChunk::content).toList();
-            List<float[]> embeddings = embeddingService.embedBatch(texts);
+            List<float[]> embeddings = embeddingService.embedBatch(texts, stack);
             if (embeddings.size() != chunks.size()) {
                 throw new IllegalStateException(
                         "Embeddings count mismatch for " + document.title()

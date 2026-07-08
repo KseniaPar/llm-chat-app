@@ -18,14 +18,23 @@ public class RagDatabaseBootstrap {
 
     private static final Logger log = LoggerFactory.getLogger(RagDatabaseBootstrap.class);
 
-    private final String indexDbPath;
+    private final String cloudIndexDbPath;
+    private final String localIndexDbPath;
 
-    public RagDatabaseBootstrap(@Value("${app.rag.index-db:data/rag-index.db}") String indexDbPath) {
-        this.indexDbPath = indexDbPath;
+    public RagDatabaseBootstrap(
+            @Value("${app.rag.index-db:data/rag-index.db}") String cloudIndexDbPath,
+            @Value("${app.rag.local.index-db:data/rag-index-local.db}") String localIndexDbPath) {
+        this.cloudIndexDbPath = cloudIndexDbPath;
+        this.localIndexDbPath = localIndexDbPath;
     }
 
     @EventListener(ApplicationReadyEvent.class)
-    public void ensureSchema() {
+    public void ensureSchemas() {
+        ensureSchema(cloudIndexDbPath);
+        ensureSchema(localIndexDbPath);
+    }
+
+    public static void ensureSchema(String indexDbPath) {
         try {
             Path path = Paths.get(indexDbPath).toAbsolutePath().normalize();
             if (path.getParent() != null) {
@@ -70,16 +79,16 @@ public class RagDatabaseBootstrap {
             jdbc.execute("CREATE INDEX IF NOT EXISTS idx_rag_chunks_strategy ON rag_chunks(strategy)");
             log.info("RAG index DB ready at {}", path);
         } catch (Exception exception) {
-            log.warn("Failed to bootstrap RAG DB: {}", exception.getMessage());
+            log.warn("Failed to bootstrap RAG DB at {}: {}", indexDbPath, exception.getMessage());
         }
     }
 
-    public JdbcTemplate createJdbcTemplate() {
+    public static JdbcTemplate createJdbcTemplate(String indexDbPath) {
         Path path = Paths.get(indexDbPath).toAbsolutePath().normalize();
         return createJdbc(path);
     }
 
-    private JdbcTemplate createJdbc(Path path) {
+    private static JdbcTemplate createJdbc(Path path) {
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("org.sqlite.JDBC");
         dataSource.setUrl("jdbc:sqlite:" + path);

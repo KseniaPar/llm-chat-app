@@ -1,9 +1,9 @@
 package com.example.llmchat.rag;
 
-import com.example.llmchat.agent.CompletionResult;
 import com.example.llmchat.agent.OpenRouterHttpClient;
 import com.example.llmchat.dto.RagChatMessageDto;
 import com.example.llmchat.dto.RagDialogMemoryDto;
+import com.example.llmchat.dto.RagLlmCompareResponse;
 import com.example.llmchat.dto.RagModeCompareResponse;
 import com.example.llmchat.dto.RagModeResultDto;
 import com.example.llmchat.dto.RagQueryCompareResponse;
@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 public class RagQueryService {
@@ -35,34 +36,55 @@ public class RagQueryService {
     private static final int PREVIEW_CHARS = 400;
 
     private final RagRetrievalService retrievalService;
-    private final OpenRouterHttpClient openRouterHttpClient;
+    private final RagCompletionService completionService;
     private final RagCitationBuilder citationBuilder;
     private final RagRelevanceGuard relevanceGuard;
-    private final String model;
-    private final double temperature;
-    private final int maxTokens;
     private final double defaultMinSimilarity;
     private final int searchPoolSize;
 
     public RagQueryService(
             RagRetrievalService retrievalService,
-            OpenRouterHttpClient openRouterHttpClient,
+            RagCompletionService completionService,
             RagCitationBuilder citationBuilder,
             RagRelevanceGuard relevanceGuard,
-            @Value("${app.openrouter.model}") String model,
-            @Value("${app.agent.temperature}") double temperature,
-            @Value("${app.agent.max-tokens}") int maxTokens,
             @Value("${app.rag.min-similarity:0.65}") double defaultMinSimilarity,
             @Value("${app.rag.search-pool-size:20}") int searchPoolSize) {
         this.retrievalService = retrievalService;
-        this.openRouterHttpClient = openRouterHttpClient;
+        this.completionService = completionService;
         this.citationBuilder = citationBuilder;
         this.relevanceGuard = relevanceGuard;
-        this.model = model;
-        this.temperature = temperature;
-        this.maxTokens = maxTokens;
         this.defaultMinSimilarity = defaultMinSimilarity;
         this.searchPoolSize = searchPoolSize;
+    }
+
+    public String localModelName() {
+        return completionService.localModel();
+    }
+
+    public String cloudModelName() {
+        return completionService.cloudModel();
+    }
+
+    public RagQueryResponse query(
+            String question,
+            boolean useRag,
+            ChunkingStrategy strategy,
+            Integer topK,
+            RagRetrievalMode mode,
+            Double minSimilarity,
+            RagLlmProvider llmProvider) {
+        RagLlmProvider provider = llmProvider != null ? llmProvider : RagLlmProvider.LOCAL;
+        if (!useRag) {
+            return completeWithoutRag(question, provider);
+        }
+
+        RagStack stack = stackFor(provider);
+        RagRetrievalMode effectiveMode = resolveRetrievalMode(mode, provider);
+        long retrievalStarted = System.currentTimeMillis();
+        RagRetrievalService.RetrievalResult retrieval = retrievalService.retrieve(
+                question, strategy, effectiveMode, topK, minSimilarity, stack);
+        long retrievalDurationMs = System.currentTimeMillis() - retrievalStarted;
+        return buildRagResponse(question, retrieval, provider, retrievalDurationMs);
     }
 
     public RagQueryResponse query(
@@ -72,19 +94,31 @@ public class RagQueryService {
             Integer topK,
             RagRetrievalMode mode,
             Double minSimilarity) {
-        if (!useRag) {
-            String answer = completeWithoutRag(question);
-            return new RagQueryResponse(answer, List.of(), "WITHOUT_RAG");
-        }
-
-        RagRetrievalMode effectiveMode = mode != null ? mode : RagRetrievalMode.FILTERED;
-        RagRetrievalService.RetrievalResult retrieval = retrievalService.retrieve(
-                question, strategy, effectiveMode, topK, minSimilarity);
-        return buildRagResponse(question, retrieval);
+        return query(question, useRag, strategy, topK, mode, minSimilarity, RagLlmProvider.LOCAL);
     }
 
     public RagQueryResponse query(String question, boolean useRag, ChunkingStrategy strategy, Integer topK) {
-        return query(question, useRag, strategy, topK, RagRetrievalMode.RAW, null);
+        return query(question, useRag, strategy, topK, RagRetrievalMode.RAW, null, RagLlmProvider.LOCAL);
+    }
+
+    public RagQueryResponse queryChatTurn(
+            String message,
+            List<RagChatMessageDto> history,
+            RagDialogMemoryDto taskMemory,
+            ChunkingStrategy strategy,
+            Integer topK,
+            RagRetrievalMode mode,
+            Double minSimilarity,
+            RagLlmProvider llmProvider) {
+        RagLlmProvider provider = llmProvider != null ? llmProvider : RagLlmProvider.LOCAL;
+        RagStack stack = stackFor(provider);
+        RagRetrievalMode effectiveMode = resolveRetrievalMode(mode, provider);
+        String searchQuery = buildEnrichedSearchQuery(message, taskMemory);
+        long retrievalStarted = System.currentTimeMillis();
+        RagRetrievalService.RetrievalResult retrieval = retrievalService.retrieve(
+                searchQuery, strategy, effectiveMode, topK, minSimilarity, stack);
+        long retrievalDurationMs = System.currentTimeMillis() - retrievalStarted;
+        return buildChatRagResponse(message, history, taskMemory, retrieval, provider, retrievalDurationMs);
     }
 
     public RagQueryResponse queryChatTurn(
@@ -95,16 +129,72 @@ public class RagQueryService {
             Integer topK,
             RagRetrievalMode mode,
             Double minSimilarity) {
-        RagRetrievalMode effectiveMode = mode != null ? mode : RagRetrievalMode.REWRITE_FILTERED;
-        String searchQuery = buildEnrichedSearchQuery(message, taskMemory);
-        RagRetrievalService.RetrievalResult retrieval = retrievalService.retrieve(
-                searchQuery, strategy, effectiveMode, topK, minSimilarity);
-        return buildChatRagResponse(message, history, taskMemory, retrieval);
+        return queryChatTurn(message, history, taskMemory, strategy, topK, mode, minSimilarity, RagLlmProvider.LOCAL);
+    }
+
+    public RagLlmCompareResponse compareLlmProviders(
+            String question,
+            ChunkingStrategy strategy,
+            Integer topK,
+            Double minSimilarity) {
+        RagRetrievalMode mode = RagRetrievalMode.FILTERED;
+
+        long localRetrievalStarted = System.currentTimeMillis();
+        RagRetrievalService.RetrievalResult localRetrieval = retrievalService.retrieve(
+                question, strategy, mode, topK, minSimilarity, RagStack.LOCAL);
+        long localRetrievalMs = System.currentTimeMillis() - localRetrievalStarted;
+
+        long cloudRetrievalStarted = System.currentTimeMillis();
+        RagRetrievalService.RetrievalResult cloudRetrieval = retrievalService.retrieve(
+                question, strategy, mode, topK, minSimilarity, RagStack.CLOUD);
+        long cloudRetrievalMs = System.currentTimeMillis() - cloudRetrievalStarted;
+
+        RagQueryResponse local = buildRagResponse(question, localRetrieval, RagLlmProvider.LOCAL, localRetrievalMs);
+        RagQueryResponse cloud = buildRagResponse(question, cloudRetrieval, RagLlmProvider.CLOUD, cloudRetrievalMs);
+
+        long localMs = local.generationDurationMs() != null ? local.generationDurationMs() : 0;
+        long cloudMs = cloud.generationDurationMs() != null ? cloud.generationDurationMs() : 0;
+        String speedWinner;
+        if (!Boolean.TRUE.equals(local.generationSuccess()) && !Boolean.TRUE.equals(cloud.generationSuccess())) {
+            speedWinner = "—";
+        } else if (!Boolean.TRUE.equals(local.generationSuccess())) {
+            speedWinner = "CLOUD";
+        } else if (!Boolean.TRUE.equals(cloud.generationSuccess())) {
+            speedWinner = "LOCAL";
+        } else if (localMs < cloudMs) {
+            speedWinner = "LOCAL";
+        } else if (cloudMs < localMs) {
+            speedWinner = "CLOUD";
+        } else {
+            speedWinner = "TIE";
+        }
+
+        int localSources = local.sources() != null ? local.sources().size() : 0;
+        int cloudSources = cloud.sources() != null ? cloud.sources().size() : 0;
+        String qualityNote = buildQualityNote(local, cloud, localSources, cloudSources)
+                + " Retrieval: LOCAL (Ollama index) vs CLOUD (OpenRouter index).";
+
+        return new RagLlmCompareResponse(
+                question,
+                local,
+                cloud,
+                new RagLlmCompareResponse.RagLlmCompareSummaryDto(
+                        localMs,
+                        cloudMs,
+                        localRetrievalMs + cloudRetrievalMs,
+                        speedWinner,
+                        localSources,
+                        cloudSources,
+                        Boolean.TRUE.equals(local.generationSuccess()),
+                        Boolean.TRUE.equals(cloud.generationSuccess()),
+                        qualityNote,
+                        buildStabilityNote(local, cloud)));
     }
 
     public RagQueryCompareResponse compare(String question, ChunkingStrategy strategy, Integer topK) {
-        RagQueryResponse withoutRag = query(question, false, strategy, topK);
-        RagQueryResponse withRag = query(question, true, strategy, topK, RagRetrievalMode.FILTERED, null);
+        RagQueryResponse withoutRag = query(question, false, strategy, topK, null, null, RagLlmProvider.LOCAL);
+        RagQueryResponse withRag = query(
+                question, true, strategy, topK, RagRetrievalMode.FILTERED, null, RagLlmProvider.LOCAL);
         return new RagQueryCompareResponse(question, withoutRag, withRag);
     }
 
@@ -134,13 +224,20 @@ public class RagQueryService {
             Integer topK,
             double threshold,
             RagRetrievalMode mode) {
+        long retrievalStarted = System.currentTimeMillis();
         RagRetrievalService.RetrievalResult retrieval = retrievalService.retrieve(
-                question, strategy, mode, topK, threshold);
-        RagQueryResponse response = buildRagResponse(question, retrieval);
+                question, strategy, mode, topK, threshold, RagStack.LOCAL);
+        long retrievalDurationMs = System.currentTimeMillis() - retrievalStarted;
+        RagQueryResponse response = buildRagResponse(
+                question, retrieval, RagLlmProvider.LOCAL, retrievalDurationMs);
         return new RagModeResultDto(mode, response, toMeta(retrieval));
     }
 
-    private RagQueryResponse buildRagResponse(String question, RagRetrievalService.RetrievalResult retrieval) {
+    private RagQueryResponse buildRagResponse(
+            String question,
+            RagRetrievalService.RetrievalResult retrieval,
+            RagLlmProvider provider,
+            long retrievalDurationMs) {
         RagRetrievalMetaDto meta = toMeta(retrieval);
         RagConfidence confidence = relevanceGuard.assess(retrieval);
 
@@ -152,7 +249,14 @@ public class RagQueryService {
                     meta,
                     List.of(),
                     List.of(),
-                    RagConfidence.UNKNOWN.name());
+                    RagConfidence.UNKNOWN.name(),
+                    provider,
+                    modelFor(provider),
+                    retrievalDurationMs,
+                    0L,
+                    0L,
+                    true,
+                    null);
         }
 
         List<RagRetrievalService.ScoredChunk> chunks = retrieval.chunks();
@@ -171,23 +275,181 @@ public class RagQueryService {
         String contextBlock = buildContextBlock(chunks);
         String userMessage = contextBlock + "\n\nВопрос: " + question;
 
-        CompletionResult completion = openRouterHttpClient.complete(
-                model,
-                temperature,
-                maxTokens,
+        RagLlmCompletionResult completion = completionService.complete(
                 List.of(
                         new OpenRouterHttpClient.ChatMessage("system", RAG_SYSTEM_PROMPT),
                         new OpenRouterHttpClient.ChatMessage("user", userMessage)),
-                false);
+                provider);
+
+        String answer = completion.success()
+                ? completion.content()
+                : "Ошибка генерации (" + provider.name() + "): " + completion.errorMessage();
 
         return new RagQueryResponse(
-                completion.content(),
+                answer,
                 used,
                 retrieval.mode().name(),
                 meta,
                 citations.sources(),
                 citations.quotes(),
-                confidence.name());
+                confidence.name(),
+                provider,
+                completion.model(),
+                retrievalDurationMs,
+                completion.durationMs(),
+                completion.tokenCount(),
+                completion.success(),
+                completion.errorMessage());
+    }
+
+    private RagQueryResponse buildChatRagResponse(
+            String message,
+            List<RagChatMessageDto> history,
+            RagDialogMemoryDto taskMemory,
+            RagRetrievalService.RetrievalResult retrieval,
+            RagLlmProvider provider,
+            long retrievalDurationMs) {
+        RagRetrievalMetaDto meta = toMeta(retrieval);
+        RagConfidence confidence = relevanceGuard.assess(retrieval);
+
+        if (relevanceGuard.shouldRefuse(confidence)) {
+            return new RagQueryResponse(
+                    RagRelevanceGuard.UNKNOWN_ANSWER.trim(),
+                    List.of(),
+                    retrieval.mode().name(),
+                    meta,
+                    List.of(),
+                    List.of(),
+                    RagConfidence.UNKNOWN.name(),
+                    provider,
+                    modelFor(provider),
+                    retrievalDurationMs,
+                    0L,
+                    0L,
+                    true,
+                    null);
+        }
+
+        List<RagRetrievalService.ScoredChunk> chunks = retrieval.chunks();
+        RagCitationBuilder.CitationBundle citations = citationBuilder.build(
+                retrieval.originalQuery(), retrieval.searchQuery(), chunks);
+        java.util.Map<String, String> quoteByChunkId = citations.quotes().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        q -> q.chunkId(),
+                        q -> q.text(),
+                        (left, right) -> left,
+                        java.util.LinkedHashMap::new));
+        List<RagQueryResponse.ChunkUsedDto> used = chunks.stream()
+                .map(chunk -> toChunkUsed(chunk, quoteByChunkId.get(chunk.chunkId())))
+                .toList();
+
+        String contextBlock = buildContextBlock(chunks);
+        List<OpenRouterHttpClient.ChatMessage> chatMessages = buildChatMessages(
+                message, history, taskMemory, contextBlock);
+
+        RagLlmCompletionResult completion = completionService.complete(chatMessages, provider);
+
+        String answer = completion.success()
+                ? completion.content()
+                : "Ошибка генерации (" + provider.name() + "): " + completion.errorMessage();
+
+        return new RagQueryResponse(
+                answer,
+                used,
+                retrieval.mode().name(),
+                meta,
+                citations.sources(),
+                citations.quotes(),
+                confidence.name(),
+                provider,
+                completion.model(),
+                retrievalDurationMs,
+                completion.durationMs(),
+                completion.tokenCount(),
+                completion.success(),
+                completion.errorMessage());
+    }
+
+    private RagQueryResponse completeWithoutRag(String question, RagLlmProvider provider) {
+        RagLlmCompletionResult completion = completionService.complete(
+                List.of(
+                        new OpenRouterHttpClient.ChatMessage(
+                                "system",
+                                "Ты учебный ассистент. Ответь кратко без доступа к документу."),
+                        new OpenRouterHttpClient.ChatMessage("user", question)),
+                provider);
+
+        String answer = completion.success()
+                ? completion.content()
+                : "Ошибка генерации (" + provider.name() + "): " + completion.errorMessage();
+
+        return new RagQueryResponse(
+                answer,
+                List.of(),
+                "WITHOUT_RAG",
+                null,
+                List.of(),
+                List.of(),
+                null,
+                provider,
+                completion.model(),
+                null,
+                completion.durationMs(),
+                completion.tokenCount(),
+                completion.success(),
+                completion.errorMessage());
+    }
+
+    private static RagStack stackFor(RagLlmProvider provider) {
+        return provider == RagLlmProvider.LOCAL ? RagStack.LOCAL : RagStack.CLOUD;
+    }
+
+    private RagRetrievalMode resolveRetrievalMode(RagRetrievalMode mode, RagLlmProvider provider) {
+        RagRetrievalMode requested = mode != null ? mode : RagRetrievalMode.FILTERED;
+        if (provider == RagLlmProvider.LOCAL && requested == RagRetrievalMode.REWRITE_FILTERED) {
+            return RagRetrievalMode.FILTERED;
+        }
+        return requested;
+    }
+
+    private String modelFor(RagLlmProvider provider) {
+        return provider == RagLlmProvider.LOCAL
+                ? completionService.localModel()
+                : completionService.cloudModel();
+    }
+
+    private static String buildQualityNote(
+            RagQueryResponse local,
+            RagQueryResponse cloud,
+            int localSources,
+            int cloudSources) {
+        if (!Boolean.TRUE.equals(local.generationSuccess()) && !Boolean.TRUE.equals(cloud.generationSuccess())) {
+            return "Обе модели вернули ошибку.";
+        }
+        if (localSources > cloudSources) {
+            return "Локальная модель: больше источников (" + localSources + " vs " + cloudSources + ").";
+        }
+        if (cloudSources > localSources) {
+            return "Облачная модель: больше источников (" + cloudSources + " vs " + localSources + ").";
+        }
+        String localConf = local.confidence() != null ? local.confidence() : "—";
+        String cloudConf = cloud.confidence() != null ? cloud.confidence() : "—";
+        return "Одинаковое число источников; confidence LOCAL=" + localConf + ", CLOUD=" + cloudConf + ".";
+    }
+
+    private static String buildStabilityNote(RagQueryResponse local, RagQueryResponse cloud) {
+        boolean localOk = Boolean.TRUE.equals(local.generationSuccess());
+        boolean cloudOk = Boolean.TRUE.equals(cloud.generationSuccess());
+        if (localOk && cloudOk) {
+            return "Обе модели ответили успешно на одном контексте.";
+        }
+        if (!localOk && !cloudOk) {
+            return "Обе модели завершились с ошибкой.";
+        }
+        return localOk
+                ? "Локальная модель стабильна; облачная вернула ошибку."
+                : "Облачная модель стабильна; локальная вернула ошибку: "
+                        + (local.generationError() != null ? local.generationError() : "unknown");
     }
 
     private RagQueryResponse.ChunkUsedDto toChunkUsed(RagRetrievalService.ScoredChunk chunk, String quoteExcerpt) {
@@ -216,70 +478,8 @@ public class RagQueryService {
                 retrieval.droppedCount(),
                 retrieval.minSimilarity(),
                 retrieval.scoresBefore(),
-                retrieval.scoresAfter());
-    }
-
-    private String completeWithoutRag(String question) {
-        CompletionResult result = openRouterHttpClient.complete(
-                model,
-                temperature,
-                maxTokens,
-                List.of(
-                        new OpenRouterHttpClient.ChatMessage(
-                                "system",
-                                "Ты учебный ассистент. Ответь кратко без доступа к документу."),
-                        new OpenRouterHttpClient.ChatMessage("user", question)),
-                false);
-        return result.content();
-    }
-
-    private RagQueryResponse buildChatRagResponse(
-            String message,
-            List<RagChatMessageDto> history,
-            RagDialogMemoryDto taskMemory,
-            RagRetrievalService.RetrievalResult retrieval) {
-        RagRetrievalMetaDto meta = toMeta(retrieval);
-        RagConfidence confidence = relevanceGuard.assess(retrieval);
-
-        if (relevanceGuard.shouldRefuse(confidence)) {
-            return new RagQueryResponse(
-                    RagRelevanceGuard.UNKNOWN_ANSWER.trim(),
-                    List.of(),
-                    retrieval.mode().name(),
-                    meta,
-                    List.of(),
-                    List.of(),
-                    RagConfidence.UNKNOWN.name());
-        }
-
-        List<RagRetrievalService.ScoredChunk> chunks = retrieval.chunks();
-        RagCitationBuilder.CitationBundle citations = citationBuilder.build(
-                retrieval.originalQuery(), retrieval.searchQuery(), chunks);
-        java.util.Map<String, String> quoteByChunkId = citations.quotes().stream()
-                .collect(java.util.stream.Collectors.toMap(
-                        q -> q.chunkId(),
-                        q -> q.text(),
-                        (left, right) -> left,
-                        java.util.LinkedHashMap::new));
-        List<RagQueryResponse.ChunkUsedDto> used = chunks.stream()
-                .map(chunk -> toChunkUsed(chunk, quoteByChunkId.get(chunk.chunkId())))
-                .toList();
-
-        String contextBlock = buildContextBlock(chunks);
-        List<OpenRouterHttpClient.ChatMessage> chatMessages = buildChatMessages(
-                message, history, taskMemory, contextBlock);
-
-        CompletionResult completion = openRouterHttpClient.complete(
-                model, temperature, maxTokens, chatMessages, false);
-
-        return new RagQueryResponse(
-                completion.content(),
-                used,
-                retrieval.mode().name(),
-                meta,
-                citations.sources(),
-                citations.quotes(),
-                confidence.name());
+                retrieval.scoresAfter(),
+                retrieval.embeddingSource());
     }
 
     private List<OpenRouterHttpClient.ChatMessage> buildChatMessages(
@@ -349,7 +549,7 @@ public class RagQueryService {
             builder.append("--- Фрагмент ").append(i + 1)
                     .append(" [id=").append(chunk.chunkId())
                     .append(", ").append(chunk.section())
-                    .append(", score=").append(String.format("%.3f", chunk.semanticScore())).append("] ---\n");
+                    .append(", score=").append(String.format(Locale.ROOT, "%.3f", chunk.semanticScore())).append("] ---\n");
             builder.append(chunk.content()).append("\n\n");
         }
         return builder.toString();

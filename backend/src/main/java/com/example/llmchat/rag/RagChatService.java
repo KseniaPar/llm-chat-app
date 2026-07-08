@@ -37,7 +37,8 @@ public class RagChatService {
                 request.strategy() != null ? request.strategy() : ChunkingStrategy.STRUCTURE,
                 request.topK(),
                 request.mode(),
-                request.minSimilarity());
+                request.minSimilarity(),
+                request.llmProvider());
 
         RagChatMessageDto assistantMessage = RagChatMessageDto.assistant(
                 ragResponse.answer(),

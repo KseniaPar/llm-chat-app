@@ -1,20 +1,26 @@
 package com.example.llmchat.rag;
 
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Repository;
 
+import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-@Repository
 public class RagIndexRepository {
 
     private final JdbcTemplate jdbc;
+    private final String dbPath;
 
-    public RagIndexRepository(RagDatabaseBootstrap bootstrap) {
-        this.jdbc = bootstrap.createJdbcTemplate();
+    public RagIndexRepository(String indexDbPath) {
+        this.dbPath = Paths.get(indexDbPath).toAbsolutePath().normalize().toString();
+        RagDatabaseBootstrap.ensureSchema(indexDbPath);
+        this.jdbc = RagDatabaseBootstrap.createJdbcTemplate(indexDbPath);
+    }
+
+    public String dbPath() {
+        return dbPath;
     }
 
     public void clearStrategy(ChunkingStrategy strategy) {

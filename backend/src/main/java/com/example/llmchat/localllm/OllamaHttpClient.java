@@ -29,20 +29,25 @@ public class OllamaHttpClient {
     }
 
     private final RestTemplate restTemplate;
+    private final RestTemplate chatRestTemplate;
     private final ObjectMapper objectMapper;
     private final String baseUrl;
     private final String configuredModel;
+    private final Object requestLock = new Object();
 
     public OllamaHttpClient(
             ObjectMapper objectMapper,
             RestTemplateBuilder restTemplateBuilder,
             @Value("${app.local-llm.base-url}") String baseUrl,
             @Value("${app.local-llm.model}") String configuredModel,
-            @Value("${app.local-llm.request-timeout}") Duration requestTimeout) {
+            @Value("${app.local-llm.request-timeout}") Duration requestTimeout,
+            @Value("${app.local-llm.chat-request-timeout:600s}") Duration chatRequestTimeout,
+            @Value("${app.local-llm.connect-timeout:30s}") Duration connectTimeout) {
         this.objectMapper = objectMapper;
         this.baseUrl = trimTrailingSlash(baseUrl);
         this.configuredModel = configuredModel;
-        this.restTemplate = createRestTemplate(restTemplateBuilder, requestTimeout);
+        this.restTemplate = createRestTemplate(restTemplateBuilder, connectTimeout, requestTimeout);
+        this.chatRestTemplate = createRestTemplate(restTemplateBuilder, connectTimeout, chatRequestTimeout);
     }
 
     public boolean isReachable() {
@@ -74,6 +79,79 @@ public class OllamaHttpClient {
     public record ChatMessage(String role, String content) {
     }
 
+
+    public List<float[]> embedBatch(List<String> texts, String model) {
+        if (texts == null || texts.isEmpty()) {
+            return List.of();
+        }
+        List<float[]> results = new ArrayList<>(texts.size());
+        for (String text : texts) {
+            results.add(embed(text, model));
+        }
+        return results;
+    }
+
+    public float[] embed(String text, String model) {
+        if (text == null || text.isBlank()) {
+            throw new IllegalArgumentException("text is required");
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", model);
+        body.put("input", text);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
+
+        synchronized (requestLock) {
+            try {
+                ResponseEntity<String> response = restTemplate.exchange(
+                        baseUrl + "/api/embed",
+                        HttpMethod.POST,
+                        request,
+                        String.class);
+                return parseEmbedResponse(response.getBody());
+            } catch (HttpStatusCodeException exception) {
+                throw new OllamaHttpException(
+                        exception.getStatusCode().value(),
+                        exception.getResponseBodyAsString(StandardCharsets.UTF_8));
+            } catch (RestClientException exception) {
+                throw new OllamaHttpException(502, "Ollama embed недоступен: " + exception.getMessage());
+            }
+        }
+    }
+
+    private float[] parseEmbedResponse(String responseBody) {
+        if (responseBody == null || responseBody.isBlank()) {
+            throw new OllamaHttpException(502, "Пустой ответ от Ollama embed.");
+        }
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            JsonNode embeddings = root.path("embeddings");
+            if (embeddings.isArray() && !embeddings.isEmpty()) {
+                JsonNode first = embeddings.get(0);
+                return jsonArrayToVector(first);
+            }
+            JsonNode embedding = root.path("embedding");
+            if (embedding.isArray() && !embedding.isEmpty()) {
+                return jsonArrayToVector(embedding);
+            }
+            throw new OllamaHttpException(502, "Ollama embed вернул ответ без embeddings.");
+        } catch (OllamaHttpException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new OllamaHttpException(502, "Не удалось разобрать Ollama embed: " + exception.getMessage());
+        }
+    }
+
+    private float[] jsonArrayToVector(JsonNode array) {
+        float[] vector = new float[array.size()];
+        for (int i = 0; i < array.size(); i++) {
+            vector[i] = (float) array.get(i).asDouble();
+        }
+        return vector;
+    }
+
     public ChatResult chat(String prompt, String model, double temperature, int maxTokens) {
         return chatMessages(List.of(new ChatMessage("user", prompt)), model, temperature, maxTokens);
     }
@@ -99,6 +177,7 @@ public class OllamaHttpClient {
         body.put("model", model);
         body.put("messages", ollamaMessages);
         body.put("stream", false);
+        body.put("keep_alive", "30m");
         body.put("options", Map.of(
                 "temperature", temperature,
                 "num_predict", maxTokens));
@@ -107,19 +186,21 @@ public class OllamaHttpClient {
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
 
-        try {
-            ResponseEntity<String> response = restTemplate.exchange(
-                    baseUrl + "/api/chat",
-                    HttpMethod.POST,
-                    request,
-                    String.class);
-            return parseChatResponse(response.getBody());
-        } catch (HttpStatusCodeException exception) {
-            throw new OllamaHttpException(
-                    exception.getStatusCode().value(),
-                    exception.getResponseBodyAsString(StandardCharsets.UTF_8));
-        } catch (RestClientException exception) {
-            throw new OllamaHttpException(502, "Ollama недоступен: " + exception.getMessage());
+        synchronized (requestLock) {
+            try {
+                ResponseEntity<String> response = chatRestTemplate.exchange(
+                        baseUrl + "/api/chat",
+                        HttpMethod.POST,
+                        request,
+                        String.class);
+                return parseChatResponse(response.getBody());
+            } catch (HttpStatusCodeException exception) {
+                throw new OllamaHttpException(
+                        exception.getStatusCode().value(),
+                        exception.getResponseBodyAsString(StandardCharsets.UTF_8));
+            } catch (RestClientException exception) {
+                throw new OllamaHttpException(502, "Ollama недоступен: " + exception.getMessage());
+            }
         }
     }
 
@@ -180,10 +261,13 @@ public class OllamaHttpClient {
         }
     }
 
-    private RestTemplate createRestTemplate(RestTemplateBuilder builder, Duration requestTimeout) {
+    private RestTemplate createRestTemplate(
+            RestTemplateBuilder builder,
+            Duration connectTimeout,
+            Duration readTimeout) {
         RestTemplate template = builder
-                .setConnectTimeout(requestTimeout)
-                .setReadTimeout(requestTimeout)
+                .setConnectTimeout(connectTimeout)
+                .setReadTimeout(readTimeout)
                 .build();
         for (var converter : template.getMessageConverters()) {
             if (converter instanceof StringHttpMessageConverter stringConverter) {

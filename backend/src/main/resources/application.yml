@@ -238,6 +238,14 @@ app:
     corpus-dir: data/rag-corpus
     index-db: data/rag-index.db
     embedding-model: openai/text-embedding-3-small
+    cloud:
+      embedding-model: openai/text-embedding-3-small
+    local:
+      index-db: data/rag-index-local.db
+      embedding-model: nomic-embed-text
+      auto-index-on-startup: true
+      max-tokens: 256
+      warmup-on-ready: true
     embedding-batch-size: 64
     default-top-k: 5
     search-pool-size: 20
@@ -246,6 +254,8 @@ app:
     keyword-filter-floor: 0.18
     fixed-chunk-size: 1200
     chunk-overlap: 200
+    embedding-timeout: 30s
+    embedding-fallback-on-failure: true
     structure-chunk-overlap: 0
     dialog-memory-update-prompt: |
       Ты обновляешь память задачи в учебном RAG-диалоге по материалу «Основы православия».
@@ -282,7 +292,9 @@ app:
     model: qwen2.5:14b
     temperature: 0.5
     max-tokens: 512
-    request-timeout: 120s
+    connect-timeout: 30s
+    request-timeout: 180s
+    chat-request-timeout: 600s
 
 server:
   port: 8080
