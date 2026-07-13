@@ -1,0 +1,20 @@
+[Unit]
+Description=LLM Chat Private AI Service (Day 30)
+After=network.target ollama.service
+Wants=ollama.service
+
+[Service]
+Type=simple
+User=llmchat
+Group=llmchat
+WorkingDirectory=APP_ROOT_PLACEHOLDER
+EnvironmentFile=APP_ROOT_PLACEHOLDER/deploy/vps/.env
+ExecStart=/usr/bin/java -Xms512m -Xmx2g -Dfile.encoding=UTF-8 -jar APP_ROOT_PLACEHOLDER/backend/target/llm-chat-backend-0.0.1-SNAPSHOT.jar
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=llm-chat
+
+[Install]
+WantedBy=multi-user.target

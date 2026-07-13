@@ -1,5 +1,8 @@
 package com.example.llmchat.agent;
 
+import com.example.llmchat.config.LlmProviderConfig;
+import com.example.llmchat.localllm.LocalLlmService;
+import com.example.llmchat.localllm.OllamaHttpClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,18 +31,33 @@ public class OpenRouterHttpClient {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
     private final HttpExchangeLogger httpExchangeLogger;
+    private final OllamaHttpClient ollamaHttpClient;
+    private final LocalLlmService localLlmService;
+    private final LlmProviderConfig llmProviderConfig;
     private final String apiKey;
     private final String chatCompletionsUrl;
+    private final double localTemperature;
+    private final int localMaxTokens;
 
     public OpenRouterHttpClient(
             ObjectMapper objectMapper,
             HttpExchangeLogger httpExchangeLogger,
+            OllamaHttpClient ollamaHttpClient,
+            LocalLlmService localLlmService,
+            LlmProviderConfig llmProviderConfig,
             @Value("${app.openrouter.api-key}") String apiKey,
-            @Value("${app.openrouter.base-url}") String baseUrl) {
+            @Value("${app.openrouter.base-url}") String baseUrl,
+            @Value("${app.local-llm.temperature}") double localTemperature,
+            @Value("${app.local-llm.max-tokens}") int localMaxTokens) {
         this.objectMapper = objectMapper;
         this.httpExchangeLogger = httpExchangeLogger;
+        this.ollamaHttpClient = ollamaHttpClient;
+        this.localLlmService = localLlmService;
+        this.llmProviderConfig = llmProviderConfig;
         this.apiKey = apiKey;
         this.chatCompletionsUrl = baseUrl + "/v1/chat/completions";
+        this.localTemperature = localTemperature;
+        this.localMaxTokens = localMaxTokens;
         this.restTemplate = createRestTemplate();
     }
 
@@ -53,6 +71,10 @@ public class OpenRouterHttpClient {
             int maxTokens,
             List<ChatMessage> messages,
             boolean logExchange) {
+        if (llmProviderConfig.isLocal()) {
+            return completeLocal(temperature, maxTokens, messages, logExchange);
+        }
+
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         body.put("messages", messages.stream()
@@ -98,6 +120,47 @@ public class OpenRouterHttpClient {
                     exception.getResponseBodyAsString(StandardCharsets.UTF_8));
         } catch (RestClientException exception) {
             throw new OpenRouterHttpException(502, "Сетевая ошибка OpenRouter: " + exception.getMessage());
+        }
+    }
+
+    private CompletionResult completeLocal(
+            double temperature,
+            int maxTokens,
+            List<ChatMessage> messages,
+            boolean logExchange) {
+        if (messages == null || messages.isEmpty()) {
+            throw new OpenRouterHttpException(400, "messages must not be empty");
+        }
+        String model = localLlmService.model();
+        List<OllamaHttpClient.ChatMessage> ollamaMessages = messages.stream()
+                .map(message -> new OllamaHttpClient.ChatMessage(message.role(), message.content()))
+                .toList();
+
+        if (logExchange) {
+            httpExchangeLogger.logRequest("POST", "ollama:/api/chat", null, Map.of(
+                    "model", model,
+                    "messages", ollamaMessages.size(),
+                    "temperature", temperature,
+                    "max_tokens", maxTokens));
+        }
+
+        try {
+            OllamaHttpClient.ChatResult result = ollamaHttpClient.chatMessages(
+                    ollamaMessages,
+                    model,
+                    temperature > 0 ? temperature : localTemperature,
+                    maxTokens > 0 ? maxTokens : localMaxTokens);
+            int completionTokens = (int) Math.max(0, result.evalCount());
+            if (logExchange) {
+                httpExchangeLogger.logResponse(200, null, result.content());
+            }
+            return new CompletionResult(
+                    result.content() != null ? result.content() : "",
+                    0,
+                    completionTokens,
+                    completionTokens);
+        } catch (Exception exception) {
+            throw new OpenRouterHttpException(502, "Ollama недоступен: " + exception.getMessage());
         }
     }
 

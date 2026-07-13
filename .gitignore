@@ -10,4 +10,5 @@ frontend/dist/
 .DS_Store
 application-local.yml
 backend/src/main/resources/application-local.yml
+deploy/vps/.env
 data/

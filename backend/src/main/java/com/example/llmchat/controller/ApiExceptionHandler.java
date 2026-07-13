@@ -2,6 +2,7 @@ package com.example.llmchat.controller;
 
 import com.example.llmchat.agent.OpenRouterHttpException;
 import com.example.llmchat.localllm.OllamaHttpException;
+import com.example.llmchat.localllm.RateLimitExceededException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
@@ -51,6 +52,18 @@ public class ApiExceptionHandler {
                 ? HttpStatus.BAD_GATEWAY
                 : HttpStatus.BAD_REQUEST;
         return ResponseEntity.status(status).body(body);
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<Map<String, Object>> handleRateLimit(RateLimitExceededException exception) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", exception.getMessage());
+        body.put("rateLimitExceeded", true);
+        body.put("limitPerMinute", exception.limitPerMinute());
+        body.put("retryAfterSeconds", exception.retryAfterSeconds());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(exception.retryAfterSeconds()))
+                .body(body);
     }
 
     @ExceptionHandler(IllegalStateException.class)

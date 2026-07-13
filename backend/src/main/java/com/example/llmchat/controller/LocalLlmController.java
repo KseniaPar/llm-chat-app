@@ -14,9 +14,13 @@ import com.example.llmchat.dto.LocalLlmAgentChatRequest;
 import com.example.llmchat.dto.LocalLlmAgentChatResponse;
 import com.example.llmchat.dto.LocalLlmAgentHistoryResponse;
 import com.example.llmchat.dto.LocalLlmAgentResetRequest;
+import com.example.llmchat.dto.LocalLlmServiceChatResponse;
+import com.example.llmchat.dto.LocalLlmServiceInfoResponse;
+import com.example.llmchat.dto.LocalLlmServiceVerifyResponse;
 import com.example.llmchat.localllm.LocalLlmAgentService;
 import com.example.llmchat.localllm.LocalLlmDemoService;
 import com.example.llmchat.localllm.LocalLlmOptimizationService;
+import com.example.llmchat.localllm.LocalLlmPrivateService;
 import com.example.llmchat.localllm.LocalLlmService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,7 +31,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequestMapping("/api/local-llm")
@@ -39,16 +46,19 @@ public class LocalLlmController {
     private final LocalLlmDemoService demoService;
     private final LocalLlmAgentService agentService;
     private final LocalLlmOptimizationService optimizationService;
+    private final LocalLlmPrivateService privateService;
 
     public LocalLlmController(
             LocalLlmService localLlmService,
             LocalLlmDemoService demoService,
             LocalLlmAgentService agentService,
-            LocalLlmOptimizationService optimizationService) {
+            LocalLlmOptimizationService optimizationService,
+            LocalLlmPrivateService privateService) {
         this.localLlmService = localLlmService;
         this.demoService = demoService;
         this.agentService = agentService;
         this.optimizationService = optimizationService;
+        this.privateService = privateService;
     }
 
     @GetMapping("/status")
@@ -136,5 +146,27 @@ public class LocalLlmController {
     public LocalLlmOptimizationScenarioResultDto optimizationRunScenario(@PathVariable int scenarioId) {
         log.info("POST /api/local-llm/optimization/run/{}", scenarioId);
         return optimizationService.runScenario(scenarioId);
+    }
+
+    @GetMapping("/service/info")
+    public LocalLlmServiceInfoResponse serviceInfo() {
+        return privateService.info();
+    }
+
+    @PostMapping("/service/chat")
+    public LocalLlmServiceChatResponse serviceChat(
+            @RequestBody LocalLlmChatRequest request,
+            HttpServletRequest httpRequest,
+            @RequestHeader(value = "X-Local-Llm-Api-Key", required = false) String apiKey) {
+        log.info("POST /api/local-llm/service/chat promptLength={}, client={}",
+                request.prompt() != null ? request.prompt().length() : 0,
+                httpRequest.getRemoteAddr());
+        return privateService.chat(request.prompt(), httpRequest.getRemoteAddr(), apiKey);
+    }
+
+    @PostMapping("/service/verify")
+    public LocalLlmServiceVerifyResponse serviceVerify() {
+        log.info("POST /api/local-llm/service/verify");
+        return privateService.verify();
     }
 }

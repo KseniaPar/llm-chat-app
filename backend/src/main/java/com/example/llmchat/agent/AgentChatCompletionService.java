@@ -1,7 +1,10 @@
 package com.example.llmchat.agent;
 
 import com.example.llmchat.config.AgentChatClientConfig;
+import com.example.llmchat.config.LlmProviderConfig;
 import com.example.llmchat.dto.McpToolCallLogDto;
+import com.example.llmchat.localllm.LocalLlmService;
+import com.example.llmchat.localllm.OllamaHttpClient;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -22,19 +25,38 @@ import java.util.Map;
 public class AgentChatCompletionService {
 
     private final ChatClient agentChatClient;
+    private final OllamaHttpClient ollamaHttpClient;
+    private final LocalLlmService localLlmService;
+    private final LlmProviderConfig llmProviderConfig;
     private final String model;
+    private final double localTemperature;
+    private final int localMaxTokens;
 
     public AgentChatCompletionService(
             @Qualifier("agentChatClient") ChatClient agentChatClient,
-            @org.springframework.beans.factory.annotation.Value("${app.openrouter.model}") String model) {
+            OllamaHttpClient ollamaHttpClient,
+            LocalLlmService localLlmService,
+            LlmProviderConfig llmProviderConfig,
+            @org.springframework.beans.factory.annotation.Value("${app.openrouter.model}") String model,
+            @org.springframework.beans.factory.annotation.Value("${app.local-llm.temperature}") double localTemperature,
+            @org.springframework.beans.factory.annotation.Value("${app.local-llm.max-tokens}") int localMaxTokens) {
         this.agentChatClient = agentChatClient;
+        this.ollamaHttpClient = ollamaHttpClient;
+        this.localLlmService = localLlmService;
+        this.llmProviderConfig = llmProviderConfig;
         this.model = model;
+        this.localTemperature = localTemperature;
+        this.localMaxTokens = localMaxTokens;
     }
 
     public AgentChatResult complete(
             List<OpenRouterHttpClient.ChatMessage> messages,
             double temperature,
             int maxTokens) {
+        if (llmProviderConfig.isLocal()) {
+            return completeLocal(messages, temperature, maxTokens);
+        }
+
         AgentChatClientConfig.beginToolCallRecording();
         List<Message> springMessages = toSpringMessages(messages);
 
@@ -75,6 +97,27 @@ public class AgentChatCompletionService {
                 completionTokens,
                 totalTokens,
                 toolCalls);
+    }
+
+    private AgentChatResult completeLocal(
+            List<OpenRouterHttpClient.ChatMessage> messages,
+            double temperature,
+            int maxTokens) {
+        List<OllamaHttpClient.ChatMessage> ollamaMessages = messages.stream()
+                .map(message -> new OllamaHttpClient.ChatMessage(message.role(), message.content()))
+                .toList();
+        OllamaHttpClient.ChatResult result = ollamaHttpClient.chatMessages(
+                ollamaMessages,
+                localLlmService.model(),
+                temperature > 0 ? temperature : localTemperature,
+                maxTokens > 0 ? maxTokens : localMaxTokens);
+        int completionTokens = (int) Math.max(0, result.evalCount());
+        return new AgentChatResult(
+                result.content() != null ? result.content() : "",
+                0,
+                completionTokens,
+                completionTokens,
+                List.of());
     }
 
     private int toInt(Number value) {

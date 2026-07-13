@@ -6,6 +6,9 @@ app:
     integrated: true
     base-url: http://localhost:11434
     model: qwen2.5:14b
+    service:
+      api-key: ""
+      rate-limit-per-minute: 20
   mcp:
     enabled: false
     # Set to false if Node.js / npx is not installed (backend will start without MCP)
