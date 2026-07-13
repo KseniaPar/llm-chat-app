@@ -2,6 +2,11 @@ package com.example.llmchat.controller;
 
 import com.example.llmchat.dto.LocalLlmChatRequest;
 import com.example.llmchat.dto.LocalLlmChatResponse;
+import com.example.llmchat.dto.LocalLlmOptimizationCompareResponse;
+import com.example.llmchat.dto.LocalLlmOptimizationLastRunDto;
+import com.example.llmchat.dto.LocalLlmOptimizationRunStatusDto;
+import com.example.llmchat.dto.LocalLlmOptimizationDemoResponse;
+import com.example.llmchat.dto.LocalLlmOptimizationScenarioResultDto;
 import com.example.llmchat.dto.LocalLlmDemoResponse;
 import com.example.llmchat.dto.LocalLlmDemoRunResponse;
 import com.example.llmchat.dto.LocalLlmStatusResponse;
@@ -11,9 +16,11 @@ import com.example.llmchat.dto.LocalLlmAgentHistoryResponse;
 import com.example.llmchat.dto.LocalLlmAgentResetRequest;
 import com.example.llmchat.localllm.LocalLlmAgentService;
 import com.example.llmchat.localllm.LocalLlmDemoService;
+import com.example.llmchat.localllm.LocalLlmOptimizationService;
 import com.example.llmchat.localllm.LocalLlmService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -31,14 +38,17 @@ public class LocalLlmController {
     private final LocalLlmService localLlmService;
     private final LocalLlmDemoService demoService;
     private final LocalLlmAgentService agentService;
+    private final LocalLlmOptimizationService optimizationService;
 
     public LocalLlmController(
             LocalLlmService localLlmService,
             LocalLlmDemoService demoService,
-            LocalLlmAgentService agentService) {
+            LocalLlmAgentService agentService,
+            LocalLlmOptimizationService optimizationService) {
         this.localLlmService = localLlmService;
         this.demoService = demoService;
         this.agentService = agentService;
+        this.optimizationService = optimizationService;
     }
 
     @GetMapping("/status")
@@ -88,5 +98,43 @@ public class LocalLlmController {
     public LocalLlmChatResponse runScenario(@PathVariable int scenarioId) {
         log.info("POST /api/local-llm/demo/run/{}", scenarioId);
         return demoService.runScenario(scenarioId);
+    }
+
+    @GetMapping("/optimization/demo")
+    public LocalLlmOptimizationDemoResponse optimizationDemo() {
+        return optimizationService.buildDemo();
+    }
+
+    @PostMapping("/optimization/compare")
+    public LocalLlmOptimizationCompareResponse optimizationCompare(@RequestBody LocalLlmChatRequest request) {
+        log.info("POST /api/local-llm/optimization/compare promptLength={}",
+                request.prompt() != null ? request.prompt().length() : 0);
+        return optimizationService.compareQuestion(request.prompt());
+    }
+
+    @PostMapping("/optimization/run")
+    public LocalLlmOptimizationRunStatusDto optimizationRunAll() {
+        log.info("POST /api/local-llm/optimization/run (async)");
+        return optimizationService.startRunAsync();
+    }
+
+    @GetMapping("/optimization/run/status")
+    public LocalLlmOptimizationRunStatusDto optimizationRunStatus() {
+        return optimizationService.runStatus();
+    }
+
+    @GetMapping("/optimization/last-run")
+    public ResponseEntity<LocalLlmOptimizationLastRunDto> optimizationLastRun() {
+        LocalLlmOptimizationLastRunDto lastRun = optimizationService.lastRun();
+        if (lastRun == null) {
+            return ResponseEntity.noContent().build();
+        }
+        return ResponseEntity.ok(lastRun);
+    }
+
+    @PostMapping("/optimization/run/{scenarioId}")
+    public LocalLlmOptimizationScenarioResultDto optimizationRunScenario(@PathVariable int scenarioId) {
+        log.info("POST /api/local-llm/optimization/run/{}", scenarioId);
+        return optimizationService.runScenario(scenarioId);
     }
 }

@@ -1,32 +1,41 @@
 const questionInput = document.getElementById('question-input');
 const compareBtn = document.getElementById('compare-btn');
-const localOnlyBtn = document.getElementById('local-only-btn');
-const evalBtn = document.getElementById('eval-btn');
 const demoRunAllBtn = document.getElementById('demo-run-all-btn');
 const indexStatusEl = document.getElementById('index-status');
-const cloudIndexMeta = document.getElementById('cloud-index-meta');
 const demoScenariosEl = document.getElementById('demo-scenarios');
 const demoSummaryEl = document.getElementById('demo-summary');
 const demoStatusEl = document.getElementById('demo-status');
+const lastRunBanner = document.getElementById('last-run-banner');
 const statusDot = document.getElementById('status-dot');
 const statusMessage = document.getElementById('status-message');
-const indexMeta = document.getElementById('index-meta');
+const baselineMeta = document.getElementById('baseline-meta');
+const optimizedMeta = document.getElementById('optimized-meta');
+const useCaseEl = document.getElementById('use-case');
+const demoDescription = document.getElementById('demo-description');
 const queryStatus = document.getElementById('query-status');
 const compareSection = document.getElementById('compare-section');
 const compareStats = document.getElementById('compare-stats');
-const evalSection = document.getElementById('eval-section');
-const evalSummary = document.getElementById('eval-summary');
-const evalTableBody = document.getElementById('eval-table-body');
 
 let ollamaReady = false;
 let demoScenarios = [];
+let baselineProfile = null;
+let optimizedProfile = null;
+const pendingTimers = new Map();
+let pollTimer = null;
+let runProgressTimer = null;
+let lastRunStatus = null;
+let lastActiveStep = 0;
 
-async function apiFetch(path, options = {}) {
+async function apiFetch(path, options = {}, fetchOptions = {}) {
+  const { allowNoContent = false } = fetchOptions;
   const response = await fetch(path, {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     ...options,
   });
   const text = await response.text();
+  if (response.status === 204 && allowNoContent) {
+    return null;
+  }
   let data = null;
   if (text) {
     try {
@@ -41,6 +50,11 @@ async function apiFetch(path, options = {}) {
   return data;
 }
 
+function formatDateTime(ms) {
+  if (!ms) return '—';
+  return new Date(ms).toLocaleString('ru-RU');
+}
+
 function escapeHtml(text) {
   return String(text ?? '')
     .replaceAll('&', '&amp;')
@@ -50,24 +64,12 @@ function escapeHtml(text) {
 
 function setBusy(isBusy, message = '') {
   compareBtn.disabled = isBusy;
-  localOnlyBtn.disabled = isBusy;
-  evalBtn.disabled = isBusy;
   demoRunAllBtn.disabled = isBusy;
   questionInput.disabled = isBusy;
   queryStatus.textContent = message;
   demoScenariosEl.querySelectorAll('button').forEach((btn) => {
     btn.disabled = isBusy;
   });
-}
-
-function showCompare(data) {
-  compareSection.classList.remove('hidden');
-  renderCompareStats(data, { mode: 'full' });
-}
-
-function showLocalOnly(response) {
-  compareSection.classList.remove('hidden');
-  renderCompareStats({ localResponse: response }, { mode: 'local' });
 }
 
 function formatMs(ms) {
@@ -104,80 +106,90 @@ function winnerLabel(side, winner) {
     return winner === 'TIE' ? '≈ одинаково' : '—';
   }
   if (winner === side) {
-    return side === 'LOCAL' ? '🦙 LOCAL' : '☁️ CLOUD';
+    return side === 'BASELINE' ? '📦 BASELINE' : '⚡ OPTIMIZED';
   }
   return '—';
+}
+
+function formatProfileLine(profile) {
+  if (!profile) return '';
+  const quant = profile.quantizationNote ? ` · ${profile.quantizationNote}` : '';
+  const avail = profile.modelAvailable ? '✓' : '✗ pull required';
+  return `${profile.label}: ${profile.model}${quant} · temp ${profile.temperature} · max ${profile.maxTokens} · ctx ${profile.contextWindow} · ${avail}`;
+}
+
+function toOptimizationView(data) {
+  return {
+    localResponse: data.baselineResponse,
+    cloudResponse: data.optimizedResponse,
+    summary: data.summary
+      ? {
+          speedWinner: data.summary.speedWinner === 'BASELINE'
+            ? 'LOCAL'
+            : data.summary.speedWinner === 'OPTIMIZED'
+              ? 'CLOUD'
+              : data.summary.speedWinner,
+          qualityNote: data.summary.qualityNote,
+          stabilityNote: data.summary.resourceNote,
+        }
+      : null,
+    optimizationSummary: data.summary,
+  };
 }
 
 function renderCompareStats(data, options = { mode: 'full' }) {
   const target = options.target ?? compareStats;
   if (!target) return;
-  const isFull = options.mode === 'full' && data.cloudResponse;
-  const local = data.localResponse ?? data;
-  const cloud = data.cloudResponse;
-  const summary = data.summary;
 
-  const localTotal = totalDurationMs(local);
-  const cloudTotal = isFull ? totalDurationMs(cloud) : null;
-  const localSources = local?.sources?.length ?? 0;
-  const cloudSources = isFull ? (cloud?.sources?.length ?? 0) : 0;
-  const localChunks = local?.chunksUsed?.length ?? 0;
-  const cloudChunks = isFull ? (cloud?.chunksUsed?.length ?? 0) : 0;
-  const localQuotes = local?.quotes?.length ?? 0;
-  const cloudQuotes = isFull ? (cloud?.quotes?.length ?? 0) : 0;
+  const view = data.baselineResponse ? toOptimizationView(data) : data;
+  const isFull = options.mode === 'full' && view.cloudResponse;
+  const baseline = view.localResponse ?? view;
+  const optimized = view.cloudResponse;
+  const summary = view.summary;
+  const optSummary = view.optimizationSummary ?? data.summary;
+
+  const baselineTotal = totalDurationMs(baseline);
+  const optimizedTotal = isFull ? totalDurationMs(optimized) : null;
+  const baselineSources = baseline?.sources?.length ?? 0;
+  const optimizedSources = isFull ? (optimized?.sources?.length ?? 0) : 0;
+  const baselineChunks = baseline?.chunksUsed?.length ?? 0;
+  const optimizedChunks = isFull ? (optimized?.chunksUsed?.length ?? 0) : 0;
 
   let qualityWinner = '—';
-  if (isFull) {
-    if (localSources > cloudSources) qualityWinner = 'LOCAL';
-    else if (cloudSources > localSources) qualityWinner = 'CLOUD';
+  if (isFull && optSummary) {
+    if (optSummary.optimizedSourceMatches > optSummary.baselineSourceMatches) qualityWinner = 'CLOUD';
+    else if (optSummary.baselineSourceMatches > optSummary.optimizedSourceMatches) qualityWinner = 'LOCAL';
     else qualityWinner = 'TIE';
   }
 
-  let stabilityWinner = '—';
-  if (isFull) {
-    const localOk = local?.generationSuccess !== false;
-    const cloudOk = cloud?.generationSuccess !== false;
-    if (localOk && cloudOk) stabilityWinner = 'TIE';
-    else if (localOk) stabilityWinner = 'LOCAL';
-    else if (cloudOk) stabilityWinner = 'CLOUD';
-  }
-
   const speedWinner = summary?.speedWinner ?? (
-    isFull && localTotal != null && cloudTotal != null
-      ? (localTotal < cloudTotal ? 'LOCAL' : localTotal > cloudTotal ? 'CLOUD' : 'TIE')
+    isFull && baselineTotal != null && optimizedTotal != null
+      ? (optimizedTotal < baselineTotal ? 'CLOUD' : optimizedTotal > baselineTotal ? 'LOCAL' : 'TIE')
       : '—'
   );
 
   const cloudHeader = isFull
-    ? '<th class="llm-compare-stats__col-cloud">☁️ CLOUD</th><th class="llm-compare-stats__col-verdict">Итог</th>'
+    ? '<th class="llm-compare-stats__col-cloud">⚡ OPTIMIZED</th><th class="llm-compare-stats__col-verdict">Итог</th>'
     : '';
   const cloudColspan = isFull ? 4 : 2;
 
-  const row = (metric, localVal, cloudVal, verdict, localClass = '', cloudClass = '') => {
-    const cloudCells = isFull
-      ? `<td class="${cloudClass}">${cloudVal}</td><td class="llm-compare-stats__col-verdict">${verdict}</td>`
+  const row = (metric, baselineVal, optimizedVal, verdict, baselineClass = '', optimizedClass = '') => {
+    const optimizedCells = isFull
+      ? `<td class="${optimizedClass}">${optimizedVal}</td><td class="llm-compare-stats__col-verdict">${verdict}</td>`
       : '';
     return `<tr>
       <th scope="row">${metric}</th>
-      <td class="llm-compare-stats__col-local ${localClass}">${localVal}</td>
-      ${cloudCells}
+      <td class="llm-compare-stats__col-local ${baselineClass}">${baselineVal}</td>
+      ${optimizedCells}
     </tr>`;
   };
 
-  const embedNote = isFull && (
-    local?.retrievalMeta?.embeddingSource === 'KEYWORD_FALLBACK'
-    || cloud?.retrievalMeta?.embeddingSource === 'KEYWORD_FALLBACK'
-  )
-    ? '<p class="llm-compare-stats__note">⚠️ CLOUD embedding: keyword-only (OpenRouter недоступен)</p>'
-    : '';
-
   target.innerHTML = `
-    ${embedNote}
     <table class="compare-table llm-compare-stats">
       <thead>
         <tr>
           <th>Метрика</th>
-          <th class="llm-compare-stats__col-local">🦙 LOCAL</th>
+          <th class="llm-compare-stats__col-local">📦 BASELINE</th>
           ${cloudHeader}
         </tr>
       </thead>
@@ -185,105 +197,74 @@ function renderCompareStats(data, options = { mode: 'full' }) {
         <tr class="llm-compare-stats__group">
           <td colspan="${cloudColspan}">⚡ Скорость</td>
         </tr>
-        ${row(
-          'Retrieval',
-          formatMs(local?.retrievalDurationMs),
-          isFull ? formatMs(cloud?.retrievalDurationMs) : '',
-          '—',
-        )}
+        ${row('Retrieval', formatMs(baseline?.retrievalDurationMs), isFull ? formatMs(optimized?.retrievalDurationMs) : '', 'общий')}
         ${row(
           'Генерация',
-          formatMs(local?.generationDurationMs),
-          isFull ? formatMs(cloud?.generationDurationMs) : '',
-          winnerLabel('LOCAL', summary?.speedWinner ?? speedWinner),
-          (summary?.speedWinner ?? speedWinner) === 'LOCAL' ? 'llm-compare-stats__winner' : '',
-          (summary?.speedWinner ?? speedWinner) === 'CLOUD' ? 'llm-compare-stats__winner' : '',
-        )}
-        ${row(
-          'Итого (retrieval + gen)',
-          formatMs(localTotal),
-          isFull ? formatMs(cloudTotal) : '',
-          winnerLabel('LOCAL', speedWinner) !== '—'
-            ? winnerLabel('LOCAL', speedWinner)
-            : winnerLabel('CLOUD', speedWinner),
+          formatMs(baseline?.generationDurationMs),
+          isFull ? formatMs(optimized?.generationDurationMs) : '',
+          winnerLabel('CLOUD', speedWinner),
           speedWinner === 'LOCAL' ? 'llm-compare-stats__winner' : '',
           speedWinner === 'CLOUD' ? 'llm-compare-stats__winner' : '',
         )}
         ${row(
-          'Embedding',
-          escapeHtml(local?.retrievalMeta?.embeddingSource ?? 'OLLAMA'),
-          isFull ? escapeHtml(cloud?.retrievalMeta?.embeddingSource ?? 'OPENROUTER') : '',
-          '—',
+          'Итого',
+          formatMs(baselineTotal),
+          isFull ? formatMs(optimizedTotal) : '',
+          winnerLabel('CLOUD', speedWinner) !== '—' ? winnerLabel('CLOUD', speedWinner) : winnerLabel('BASELINE', speedWinner),
         )}
-
         <tr class="llm-compare-stats__group">
           <td colspan="${cloudColspan}">📚 Качество</td>
         </tr>
         ${row(
-          'Confidence',
-          escapeHtml(local?.confidence ?? '—'),
-          isFull ? escapeHtml(cloud?.confidence ?? '—') : '',
-          winnerLabel('LOCAL', qualityWinner) !== '—'
-            ? winnerLabel('LOCAL', qualityWinner)
-            : winnerLabel('CLOUD', qualityWinner),
+          'Совпадения терминов',
+          String(optSummary?.baselineSourceMatches ?? '—'),
+          isFull ? String(optSummary?.optimizedSourceMatches ?? '—') : '',
+          winnerLabel('CLOUD', qualityWinner) !== '—' ? winnerLabel('CLOUD', qualityWinner) : winnerLabel('BASELINE', qualityWinner),
         )}
         ${row(
-          'Чанков в контексте',
-          String(localChunks),
-          isFull ? String(cloudChunks) : '',
-          localChunks === cloudChunks ? '≈ одинаково' : (localChunks > cloudChunks ? '🦙 LOCAL' : '☁️ CLOUD'),
+          'Confidence',
+          escapeHtml(baseline?.confidence ?? '—'),
+          isFull ? escapeHtml(optimized?.confidence ?? '—') : '',
+          '—',
         )}
         ${row(
           'Источники',
-          escapeHtml(formatSources(local)),
-          isFull ? escapeHtml(formatSources(cloud)) : '',
-          winnerLabel('LOCAL', qualityWinner) !== '—'
-            ? winnerLabel('LOCAL', qualityWinner)
-            : winnerLabel('CLOUD', qualityWinner),
-          qualityWinner === 'LOCAL' ? 'llm-compare-stats__winner' : '',
-          qualityWinner === 'CLOUD' ? 'llm-compare-stats__winner' : '',
-        )}
-        ${row(
-          'Цитаты',
-          String(localQuotes),
-          isFull ? String(cloudQuotes) : '',
-          localQuotes === cloudQuotes ? '≈ одинаково' : (localQuotes > cloudQuotes ? '🦙 LOCAL' : '☁️ CLOUD'),
-        )}
-        ${row(
-          'Режим retrieval',
-          escapeHtml(local?.mode ?? '—'),
-          isFull ? escapeHtml(cloud?.mode ?? '—') : '',
+          escapeHtml(formatSources(baseline)),
+          isFull ? escapeHtml(formatSources(optimized)) : '',
           '—',
         )}
-        ${isFull && summary?.qualityNote
-          ? `<tr><th scope="row">Оценка</th><td colspan="3" class="llm-compare-stats__note-cell">${escapeHtml(summary.qualityNote)}</td></tr>`
+        ${row(
+          'Чанков',
+          String(baselineChunks),
+          isFull ? String(optimizedChunks) : '',
+          '—',
+        )}
+        ${isFull && optSummary?.qualityNote
+          ? `<tr><th scope="row">Оценка</th><td colspan="3" class="llm-compare-stats__note-cell">${escapeHtml(optSummary.qualityNote)}</td></tr>`
           : ''}
-
         <tr class="llm-compare-stats__group">
-          <td colspan="${cloudColspan}">🛡 Стабильность</td>
+          <td colspan="${cloudColspan}">🛡 Ресурсы</td>
         </tr>
         ${row(
-          'Статус генерации',
-          statusBadge(local?.generationSuccess, local?.generationError),
-          isFull ? statusBadge(cloud?.generationSuccess, cloud?.generationError) : '',
-          winnerLabel('LOCAL', stabilityWinner) !== '—'
-            ? winnerLabel('LOCAL', stabilityWinner)
-            : (stabilityWinner === 'TIE' ? '✓ обе OK' : winnerLabel('CLOUD', stabilityWinner)),
+          'Статус',
+          statusBadge(baseline?.generationSuccess, baseline?.generationError),
+          isFull ? statusBadge(optimized?.generationSuccess, optimized?.generationError) : '',
+          '—',
         )}
         ${row(
           'Модель',
-          escapeHtml(local?.llmModel ?? '—'),
-          isFull ? escapeHtml(cloud?.llmModel ?? '—') : '',
+          escapeHtml(baseline?.llmModel ?? '—'),
+          isFull ? escapeHtml(optimized?.llmModel ?? '—') : '',
           '—',
         )}
         ${row(
           'Токенов',
-          local?.tokenCount ?? '—',
-          isFull ? (cloud?.tokenCount ?? '—') : '',
+          baseline?.tokenCount ?? '—',
+          isFull ? (optimized?.tokenCount ?? '—') : '',
           '—',
         )}
-        ${isFull && summary?.stabilityNote
-          ? `<tr><th scope="row">Оценка</th><td colspan="3" class="llm-compare-stats__note-cell">${escapeHtml(summary.stabilityNote)}</td></tr>`
+        ${isFull && optSummary?.resourceNote
+          ? `<tr><th scope="row">Экономия</th><td colspan="3" class="llm-compare-stats__note-cell">${escapeHtml(optSummary.resourceNote)}</td></tr>`
           : ''}
       </tbody>
     </table>`;
@@ -325,35 +306,81 @@ function markScenarioState(scenarioId, state) {
   if (state === 'error') card.classList.add('local-llm-scenario--error');
 }
 
-function showScenarioPending(scenarioId, label) {
-  const container = demoScenariosEl.querySelector(`[data-result-for="${scenarioId}"]`);
-  if (!container) return;
-  container.classList.remove('hidden');
-  container.innerHTML = `<p class="rag-panel__hint">⏳ ${escapeHtml(label)}</p>`;
-  container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+function stopScenarioPending(scenarioId) {
+  const timer = pendingTimers.get(scenarioId);
+  if (timer) {
+    clearInterval(timer);
+    pendingTimers.delete(scenarioId);
+  }
 }
 
-function countSourceMatches(scenario, response) {
-  if (!scenario.expectedSources?.length) {
-    return String(response?.confidence || '').toUpperCase() === 'UNKNOWN' ? 1 : 0;
+function hintForElapsed(elapsed) {
+  if (elapsed < 30) return 'retrieval + загрузка модели…';
+  if (elapsed < 180) return 'BASELINE (qwen2.5:14b)…';
+  return 'OPTIMIZED (qwen2.5:7b)…';
+}
+
+function updateScenarioPendingText(scenarioId, label, startedAtMs) {
+  const container = demoScenariosEl.querySelector(`[data-result-for="${scenarioId}"]`);
+  if (!container) return;
+  const elapsed = startedAtMs ? Math.round((Date.now() - startedAtMs) / 1000) : 0;
+  const pendingEl = container.querySelector('[data-pending-label]');
+  if (!pendingEl) return;
+  pendingEl.textContent = `⏳ ${label} · ${elapsed} с · ${hintForElapsed(elapsed)}`;
+}
+
+function ensurePendingContainer(scenarioId) {
+  const container = demoScenariosEl.querySelector(`[data-result-for="${scenarioId}"]`);
+  if (!container) return null;
+  container.classList.remove('hidden');
+  if (!container.querySelector('[data-pending-label]')) {
+    container.innerHTML = '<p class="rag-panel__hint" data-pending-label>⏳ …</p>';
   }
-  let hits = 0;
-  const answerLower = String(response?.answer || '').toLowerCase();
-  for (const expected of scenario.expectedSources) {
-    const needle = expected.toLowerCase();
-    if (answerLower.includes(needle)) {
-      hits += 1;
-      continue;
-    }
-    for (const source of response?.sources || []) {
-      const section = String(source.section || '').toLowerCase();
-      if (section.includes(needle)) {
-        hits += 1;
-        break;
-      }
-    }
+  return container;
+}
+
+function stopRunProgressTimer() {
+  if (runProgressTimer) {
+    clearInterval(runProgressTimer);
+    runProgressTimer = null;
   }
-  return hits;
+  lastRunStatus = null;
+  lastActiveStep = 0;
+}
+
+function tickRunProgressUI() {
+  const status = lastRunStatus;
+  if (!status?.running) return;
+  const elapsed = status.startedAtMs ? Math.round((Date.now() - status.startedAtMs) / 1000) : 0;
+  demoStatusEl.textContent = `В фоне: шаг ${status.currentStep}/${status.totalSteps} — ${status.currentScenarioTitle || '…'} · ${elapsed} с`;
+  if (status.currentStep > 0) {
+    updateScenarioPendingText(
+      status.currentStep,
+      `Шаг ${status.currentStep}/${status.totalSteps}`,
+      status.startedAtMs,
+    );
+  }
+}
+
+function showScenarioPending(scenarioId, label, startedAtMs = null) {
+  const container = ensurePendingContainer(scenarioId);
+  if (!container) return;
+  stopScenarioPending(scenarioId);
+  if (startedAtMs) {
+    updateScenarioPendingText(scenarioId, label, startedAtMs);
+    pendingTimers.set(scenarioId, setInterval(() => {
+      updateScenarioPendingText(scenarioId, label, startedAtMs);
+    }, 1000));
+    container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    return;
+  }
+  const localStartedAt = Date.now();
+  const renderPending = () => {
+    updateScenarioPendingText(scenarioId, label, localStartedAt);
+  };
+  renderPending();
+  pendingTimers.set(scenarioId, setInterval(renderPending, 1000));
+  container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function buildDemoSummaryFromResults(results, totalDurationMs) {
@@ -365,55 +392,56 @@ function buildDemoSummaryFromResults(results, totalDurationMs) {
       summary: {
         speedVerdict: 'Нет результатов',
         qualityVerdict: '',
-        stabilityVerdict: '',
-        localSpeedWins: 0,
-        cloudSpeedWins: 0,
+        resourceVerdict: '',
+        baselineWins: 0,
+        optimizedWins: 0,
       },
     };
   }
 
-  let localMsSum = 0;
-  let cloudMsSum = 0;
-  let localWins = 0;
-  let cloudWins = 0;
-  let localSuccess = 0;
-  let cloudSuccess = 0;
-  let localSourceHits = 0;
-  let cloudSourceHits = 0;
+  let baselineMsSum = 0;
+  let optimizedMsSum = 0;
+  let baselineWins = 0;
+  let optimizedWins = 0;
+  let baselineSuccess = 0;
+  let optimizedSuccess = 0;
+  let baselineMatches = 0;
+  let optimizedMatches = 0;
+  let baselineTokens = 0;
+  let optimizedTokens = 0;
 
   for (const result of results) {
-    const compare = result.compare;
-    const local = compare.localResponse;
-    const cloud = compare.cloudResponse;
-    const localMs = local?.generationDurationMs ?? 0;
-    const cloudMs = cloud?.generationDurationMs ?? 0;
-    localMsSum += localMs;
-    cloudMsSum += cloudMs;
-
-    if (local?.generationSuccess !== false) localSuccess += 1;
-    if (cloud?.generationSuccess !== false) cloudSuccess += 1;
-
-    if (compare.summary?.speedWinner === 'LOCAL') localWins += 1;
-    else if (compare.summary?.speedWinner === 'CLOUD') cloudWins += 1;
-
-    localSourceHits += countSourceMatches(result.scenario, local);
-    cloudSourceHits += countSourceMatches(result.scenario, cloud);
+    const summary = result.compare?.summary;
+    if (!summary) continue;
+    baselineMsSum += summary.baselineGenerationMs ?? 0;
+    optimizedMsSum += summary.optimizedGenerationMs ?? 0;
+    baselineTokens += summary.baselineTokens ?? 0;
+    optimizedTokens += summary.optimizedTokens ?? 0;
+    baselineMatches += summary.baselineSourceMatches ?? 0;
+    optimizedMatches += summary.optimizedSourceMatches ?? 0;
+    if (summary.baselineSuccess) baselineSuccess += 1;
+    if (summary.optimizedSuccess) optimizedSuccess += 1;
+    if (summary.speedWinner === 'BASELINE') baselineWins += 1;
+    if (summary.speedWinner === 'OPTIMIZED') optimizedWins += 1;
   }
 
-  const avgLocal = Math.round(localMsSum / count);
-  const avgCloud = Math.round(cloudMsSum / count);
-  const speedVerdict = avgLocal < avgCloud
-    ? `LOCAL быстрее в среднем (${avgLocal} vs ${avgCloud} ms)`
-    : `CLOUD быстрее в среднем (${avgCloud} vs ${avgLocal} ms)`;
-  const qualityVerdict = localSourceHits >= cloudSourceHits
-    ? `LOCAL: ${localSourceHits} совпадений источников, CLOUD: ${cloudSourceHits}`
-    : `CLOUD: ${cloudSourceHits} совпадений источников, LOCAL: ${localSourceHits}`;
-  const stabilityVerdict = `LOCAL ${localSuccess}/${count} успешных, CLOUD ${cloudSuccess}/${count} успешных.`;
+  const avgBaseline = Math.round(baselineMsSum / count);
+  const avgOptimized = Math.round(optimizedMsSum / count);
+  const speedVerdict = avgOptimized < avgBaseline
+    ? `OPTIMIZED быстрее в среднем (${avgOptimized} vs ${avgBaseline} ms)`
+    : `BASELINE быстрее в среднем (${avgBaseline} vs ${avgOptimized} ms)`;
+  const qualityVerdict = optimizedMatches >= baselineMatches
+    ? `OPTIMIZED: ${optimizedMatches} совпадений, BASELINE: ${baselineMatches}`
+    : `BASELINE: ${baselineMatches} совпадений, OPTIMIZED: ${optimizedMatches}`;
+  const tokenSave = baselineTokens > 0
+    ? Math.round((1 - optimizedTokens / baselineTokens) * 100)
+    : 0;
+  const resourceVerdict = `Токены: BASELINE ${baselineTokens}, OPTIMIZED ${optimizedTokens} (экономия ~${tokenSave}%). Успех: ${baselineSuccess}/${count} vs ${optimizedSuccess}/${count}.`;
 
   return {
     scenarioCount: count,
     totalDurationMs,
-    summary: { speedVerdict, qualityVerdict, stabilityVerdict, localSpeedWins: localWins, cloudSpeedWins: cloudWins },
+    summary: { speedVerdict, qualityVerdict, resourceVerdict, baselineWins, optimizedWins },
   };
 }
 
@@ -425,10 +453,10 @@ function renderScenarioResult(scenarioId, result) {
   container.classList.remove('hidden');
   container.innerHTML = `
     <div class="local-llm-result__stats"></div>
-    <p class="local-llm-result__label">LOCAL</p>
-    <pre class="local-llm-result__block local-llm-result__block--answer">${escapeHtml(compare.localResponse?.answer ?? '—')}</pre>
-    <p class="local-llm-result__label">CLOUD</p>
-    <pre class="local-llm-result__block">${escapeHtml(compare.cloudResponse?.answer ?? '—')}</pre>`;
+    <p class="local-llm-result__label">BASELINE</p>
+    <pre class="local-llm-result__block local-llm-result__block--answer">${escapeHtml(compare.baselineResponse?.answer ?? '—')}</pre>
+    <p class="local-llm-result__label">OPTIMIZED</p>
+    <pre class="local-llm-result__block">${escapeHtml(compare.optimizedResponse?.answer ?? '—')}</pre>`;
   renderCompareStats(compare, {
     mode: 'full',
     target: container.querySelector('.local-llm-result__stats'),
@@ -439,61 +467,128 @@ function renderDemoRunSummary(data) {
   const s = data.summary;
   demoSummaryEl.classList.remove('hidden');
   demoSummaryEl.innerHTML = `
-    <p><strong>Итог сценария</strong> (${data.scenarioCount} шагов, ${data.totalDurationMs} ms)</p>
+    <p><strong>Итог оптимизации</strong> (${data.scenarioCount} шагов, ${Math.round(data.totalDurationMs / 1000)} с)</p>
     <p>${escapeHtml(s.speedVerdict)}</p>
     <p>${escapeHtml(s.qualityVerdict)}</p>
-    <p>${escapeHtml(s.stabilityVerdict)}</p>
-    <p>LOCAL побед по скорости: ${s.localSpeedWins}, CLOUD: ${s.cloudSpeedWins}</p>`;
+    <p>${escapeHtml(s.resourceVerdict)}</p>
+    <p>BASELINE побед по скорости: ${s.baselineWins}, OPTIMIZED: ${s.optimizedWins}</p>`;
 }
 
-function renderEvalSummary(data) {
-  const local = data.localSummary;
-  const cloud = data.cloudSummary;
-  evalSummary.innerHTML = `
-    <p><strong>LOCAL</strong> (${escapeHtml(local.provider.model)}):
-      avg ${local.avgGenerationMs} ms, успех ${local.successCount}/${data.questionCount}.
-      ${escapeHtml(local.qualityAssessment)}</p>
-    <p><strong>CLOUD</strong> (${escapeHtml(cloud.provider.model)}):
-      avg ${cloud.avgGenerationMs} ms, успех ${cloud.successCount}/${data.questionCount}.
-      ${escapeHtml(cloud.qualityAssessment)}</p>`;
+function renderLastRun(lastRun) {
+  if (!lastRun?.response) return;
+  const run = lastRun.response;
+  if (lastRunBanner) {
+    lastRunBanner.classList.remove('hidden');
+    lastRunBanner.innerHTML = `
+      <p><strong>Последний успешный запуск:</strong> ${formatDateTime(lastRun.completedAtMs)}
+        · ${run.scenarioCount} шагов · ${Math.round(run.totalDurationMs / 1000)} с</p>`;
+  }
+  for (const result of run.results || []) {
+    stopScenarioPending(result.scenario.id);
+    renderScenarioResult(result.scenario.id, result);
+    markScenarioState(result.scenario.id, 'done');
+  }
+  renderDemoRunSummary(run);
 }
 
-function renderEvalTable(results) {
-  evalTableBody.innerHTML = '';
-  if (!results?.length) {
-    evalTableBody.innerHTML = '<tr><td colspan="6" class="eval-table__empty">Нет данных</td></tr>';
-    return;
+async function loadLastRun() {
+  const lastRun = await apiFetch('/api/local-llm/optimization/last-run', {}, { allowNoContent: true });
+  if (lastRun) {
+    renderLastRun(lastRun);
   }
-  for (const row of results) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${escapeHtml(row.question.id)}</td>
-      <td class="eval-table__answer">${escapeHtml(row.question.question)}</td>
-      <td>${row.localResponse?.generationDurationMs ?? '—'}</td>
-      <td>${row.cloudResponse?.generationDurationMs ?? '—'}</td>
-      <td class="eval-table__matched">${escapeHtml((row.localMatchedSources || []).join(', ') || '—')}</td>
-      <td class="eval-table__matched">${escapeHtml((row.cloudMatchedSources || []).join(', ') || '—')}</td>`;
-    evalTableBody.appendChild(tr);
+}
+
+function updateRunProgress(status) {
+  if (!status?.running) return;
+
+  const stepChanged = status.currentStep !== lastActiveStep;
+  lastRunStatus = status;
+
+  if (stepChanged && status.currentStep > 0) {
+    if (lastActiveStep > 0) {
+      stopScenarioPending(lastActiveStep);
+    }
+    lastActiveStep = status.currentStep;
+    markScenarioState(status.currentStep, 'running');
+    ensurePendingContainer(status.currentStep);
   }
+
+  tickRunProgressUI();
+
+  if (!runProgressTimer) {
+    runProgressTimer = setInterval(tickRunProgressUI, 1000);
+  }
+}
+
+async function pollRunUntilDone() {
+  const status = await apiFetch('/api/local-llm/optimization/run/status');
+  updateRunProgress(status);
+  if (status.running) {
+    return false;
+  }
+  if (status.lastError) {
+    throw new Error(status.lastError);
+  }
+  await loadLastRun();
+  return true;
+}
+
+function startRunPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    try {
+      const done = await pollRunUntilDone();
+      if (done) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        stopRunProgressTimer();
+        if (lastActiveStep > 0) {
+          stopScenarioPending(lastActiveStep);
+        }
+        setBusy(false);
+        demoStatusEl.textContent = 'Готово — показан последний успешный запуск.';
+      }
+    } catch (error) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      stopRunProgressTimer();
+      setBusy(false);
+      demoStatusEl.textContent = error.message;
+    }
+  }, 3000);
 }
 
 async function loadDemo() {
-  const demo = await apiFetch('/api/rag/local/demo');
+  const demo = await apiFetch('/api/local-llm/optimization/demo');
   demoScenarios = demo.scenarios || [];
-  indexMeta.textContent = `LOCAL: ${demo.localIndexChunkCount} чанков · ${demo.localEmbeddingModel} · ${demo.localIndexDbPath}`;
-  cloudIndexMeta.textContent = `CLOUD: ${demo.cloudIndexChunkCount} чанков · ${demo.cloudEmbeddingModel} · ${demo.cloudIndexDbPath}`;
-  if (!demo.localIndexReady) {
-    indexStatusEl.textContent = `Локальный индекс строится при старте backend (Ollama ${demo.localEmbeddingModel}). Подождите или перезапустите backend.`;
+  baselineProfile = demo.baselineProfile;
+  optimizedProfile = demo.optimizedProfile;
+
+  if (demoDescription) {
+    demoDescription.textContent = demo.description || '';
+  }
+  if (useCaseEl) {
+    useCaseEl.textContent = demo.useCase || '';
+  }
+  baselineMeta.textContent = formatProfileLine(baselineProfile);
+  optimizedMeta.textContent = formatProfileLine(optimizedProfile);
+
+  const missingModels = [];
+  if (baselineProfile && !baselineProfile.modelAvailable) missingModels.push(baselineProfile.model);
+  if (optimizedProfile && !optimizedProfile.modelAvailable) missingModels.push(optimizedProfile.model);
+  if (missingModels.length) {
+    indexStatusEl.textContent = `Нужны модели: ollama pull ${missingModels.join(' && ollama pull ')}`;
   } else {
     indexStatusEl.textContent = '';
   }
+
   renderDemoScenarios(demoScenarios);
 
   try {
     const llmStatus = await apiFetch('/api/local-llm/status');
-    ollamaReady = llmStatus.online && llmStatus.modelAvailable;
+    ollamaReady = llmStatus.online;
     statusDot.className = `status-dot ${ollamaReady ? 'status-dot--online' : 'status-dot--offline'}`;
-    statusMessage.textContent = `${demo.localLlmStatus} · chat ${demo.localChatModel} · embed ${demo.localEmbeddingModel}`;
+    statusMessage.textContent = llmStatus.message || (ollamaReady ? 'Ollama online' : 'Ollama offline');
   } catch (error) {
     ollamaReady = false;
     statusDot.className = 'status-dot status-dot--offline';
@@ -509,14 +604,16 @@ async function runDemoScenario(scenarioId) {
   demoStatusEl.textContent = `Шаг ${scenarioId}: ${scenario.title}…`;
   questionInput.value = scenario.question;
   markScenarioState(scenarioId, 'running');
-  showScenarioPending(scenarioId, 'Выполняется retrieval + LOCAL + CLOUD…');
+  showScenarioPending(scenarioId, 'Retrieval + BASELINE + OPTIMIZED…');
 
   try {
-    const result = await apiFetch(`/api/rag/local/demo/run/${scenarioId}`, { method: 'POST' });
+    const result = await apiFetch(`/api/local-llm/optimization/run/${scenarioId}`, { method: 'POST' });
+    stopScenarioPending(scenarioId);
     renderScenarioResult(scenarioId, result);
     markScenarioState(scenarioId, 'done');
     demoStatusEl.textContent = `Шаг ${scenarioId} завершён.`;
   } catch (error) {
+    stopScenarioPending(scenarioId);
     markScenarioState(scenarioId, 'error');
     demoStatusEl.textContent = error.message;
     const container = demoScenariosEl.querySelector(`[data-result-for="${scenarioId}"]`);
@@ -533,60 +630,26 @@ async function runDemoAll() {
   if (!demoScenarios.length) return;
 
   if (!ollamaReady) {
-    demoStatusEl.textContent = 'Ollama недоступен — локальная часть может не выполниться.';
+    demoStatusEl.textContent = 'Ollama недоступен — сравнение может не выполниться.';
   }
 
   setBusy(true, '');
-  demoSummaryEl.classList.add('hidden');
+  demoStatusEl.textContent = 'Запуск сценария на backend…';
 
-  demoScenarios.forEach((scenario) => {
-    markScenarioState(scenario.id, null);
-    const container = demoScenariosEl.querySelector(`[data-result-for="${scenario.id}"]`);
-    if (container) {
-      container.classList.add('hidden');
-      container.innerHTML = '';
+  try {
+    const status = await apiFetch('/api/local-llm/optimization/run', { method: 'POST' });
+    if (status.running) {
+      demoStatusEl.textContent = 'Сценарий выполняется в фоне (~15 мин на CPU). Можно обновить страницу — результаты сохранятся.';
+      updateRunProgress(status);
+      startRunPolling();
+      return;
     }
-  });
-
-  const results = [];
-  const startedAt = Date.now();
-  const total = demoScenarios.length;
-
-  for (let index = 0; index < total; index += 1) {
-    const scenario = demoScenarios[index];
-    const stepNum = index + 1;
-
-    demoStatusEl.textContent = `Шаг ${stepNum}/${total}: ${scenario.title}…`;
-    questionInput.value = scenario.question;
-    markScenarioState(scenario.id, 'running');
-    showScenarioPending(scenario.id, `Шаг ${stepNum}/${total} — retrieval + LOCAL + CLOUD…`);
-
-    try {
-      const result = await apiFetch(`/api/rag/local/demo/run/${scenario.id}`, { method: 'POST' });
-      results.push(result);
-      renderScenarioResult(scenario.id, result);
-      markScenarioState(scenario.id, 'done');
-      demoStatusEl.textContent = `Шаг ${stepNum}/${total} готов${stepNum < total ? ' — следующий…' : ''}`;
-    } catch (error) {
-      markScenarioState(scenario.id, 'error');
-      const container = demoScenariosEl.querySelector(`[data-result-for="${scenario.id}"]`);
-      if (container) {
-        container.classList.remove('hidden');
-        container.innerHTML = `<p class="local-llm-scenario__error">${escapeHtml(error.message)}</p>`;
-      }
-      demoStatusEl.textContent = `Ошибка на шаге ${stepNum}: ${error.message}`;
-    }
+    demoStatusEl.textContent = 'Сценарий уже выполняется — отслеживаем прогресс…';
+    startRunPolling();
+  } catch (error) {
+    demoStatusEl.textContent = error.message;
+    setBusy(false);
   }
-
-  const totalDurationMs = Date.now() - startedAt;
-  if (results.length > 0) {
-    renderDemoRunSummary(buildDemoSummaryFromResults(results, totalDurationMs));
-  }
-  demoStatusEl.textContent = results.length === total
-    ? `Сценарий завершён: ${results.length}/${total} шагов за ${Math.round(totalDurationMs / 1000)} с.`
-    : `Завершено с ошибками: ${results.length}/${total} шагов за ${Math.round(totalDurationMs / 1000)} с.`;
-
-  setBusy(false);
 }
 
 async function runCompare() {
@@ -595,63 +658,15 @@ async function runCompare() {
     queryStatus.textContent = 'Введите вопрос.';
     return;
   }
-  setBusy(true, 'Retrieval + генерация LOCAL и CLOUD…');
+  setBusy(true, 'Retrieval + BASELINE + OPTIMIZED… (ожидайте 3–5 мин на CPU)');
   try {
-    const data = await apiFetch('/api/rag/query/llm/compare', {
+    const data = await apiFetch('/api/local-llm/optimization/compare', {
       method: 'POST',
-      body: JSON.stringify({ question, strategy: 'STRUCTURE', useRag: true }),
+      body: JSON.stringify({ prompt: question }),
     });
-    showCompare(data);
+    compareSection.classList.remove('hidden');
+    renderCompareStats(data, { mode: 'full' });
     queryStatus.textContent = 'Готово.';
-  } catch (error) {
-    queryStatus.textContent = error.message;
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function runLocalOnly() {
-  const question = questionInput.value.trim();
-  if (!question) {
-    queryStatus.textContent = 'Введите вопрос.';
-    return;
-  }
-  if (!ollamaReady) {
-    queryStatus.textContent = 'Ollama недоступен.';
-    return;
-  }
-  setBusy(true, 'Локальный RAG…');
-  try {
-    const response = await apiFetch('/api/rag/query', {
-      method: 'POST',
-      body: JSON.stringify({
-        question,
-        useRag: true,
-        strategy: 'STRUCTURE',
-        mode: 'FILTERED',
-        llmProvider: 'LOCAL',
-      }),
-    });
-    showLocalOnly(response);
-    queryStatus.textContent = 'Готово.';
-  } catch (error) {
-    queryStatus.textContent = error.message;
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function runEval() {
-  setBusy(true, 'Eval: 10 вопросов…');
-  evalSection.classList.remove('hidden');
-  try {
-    const data = await apiFetch('/api/rag/eval/llm/compare', {
-      method: 'POST',
-      body: JSON.stringify({ strategy: 'STRUCTURE' }),
-    });
-    renderEvalSummary(data);
-    renderEvalTable(data.results);
-    queryStatus.textContent = `Eval: ${data.questionCount} вопросов.`;
   } catch (error) {
     queryStatus.textContent = error.message;
   } finally {
@@ -660,18 +675,27 @@ async function runEval() {
 }
 
 compareBtn.addEventListener('click', runCompare);
-localOnlyBtn.addEventListener('click', runLocalOnly);
-evalBtn.addEventListener('click', runEval);
 demoRunAllBtn.addEventListener('click', runDemoAll);
+
 async function init() {
   demoScenariosEl.addEventListener('click', onDemoScenarioClick);
   setBusy(true, 'Загрузка…');
   try {
     await loadDemo();
+    await loadLastRun();
+    const status = await apiFetch('/api/local-llm/optimization/run/status');
+    if (status.running) {
+      setBusy(true, '');
+      demoStatusEl.textContent = 'Сценарий уже выполняется на backend — подключаемся…';
+      updateRunProgress(status);
+      startRunPolling();
+    }
   } catch (error) {
     statusMessage.textContent = error.message;
   } finally {
-    setBusy(false);
+    if (!pollTimer) {
+      setBusy(false);
+    }
   }
 }
 

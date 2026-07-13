@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 28 — Локальная LLM + RAG</title>
+  <title>День 29 — Оптимизация локальной LLM</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -12,35 +12,37 @@
 <body>
   <main class="rag-app rag-app--local-llm">
     <header class="rag-app__header">
-      <span class="rag-app__badge">Day 28</span>
-      <h1 class="rag-app__title">Локальная LLM + RAG</h1>
-      <p class="rag-app__desc">
-        Полностью локальный RAG: Ollama embeddings + локальный индекс + Ollama chat.
-        Сравнение с облаком — OpenRouter index + chat.
+      <span class="rag-app__badge">Day 29</span>
+      <h1 class="rag-app__title">Оптимизация локальной LLM</h1>
+      <p class="rag-app__desc" id="demo-description">
+        Сравнение базовой и оптимизированной конфигурации Ollama для RAG-ассистента.
       </p>
     </header>
 
     <section class="rag-panel">
-      <h2 class="rag-panel__title">Статус</h2>
+      <h2 class="rag-panel__title">Профили</h2>
       <div class="local-llm-status">
         <span id="status-dot" class="status-dot status-dot--offline" aria-hidden="true"></span>
         <div>
           <p id="status-message" class="local-llm-status__message">Загрузка…</p>
-          <p id="index-meta" class="local-llm-status__meta"></p>
-          <p id="cloud-index-meta" class="local-llm-status__meta"></p>
+          <p id="baseline-meta" class="local-llm-status__meta"></p>
+          <p id="optimized-meta" class="local-llm-status__meta"></p>
         </div>
       </div>
+      <p id="use-case" class="rag-panel__hint"></p>
       <p id="index-status" class="rag-panel__hint"></p>
     </section>
 
     <section class="rag-panel">
-      <h2 class="rag-panel__title">Сценарий демо</h2>
+      <h2 class="rag-panel__title">Сценарий сравнения</h2>
       <p class="rag-panel__hint">
-        6 шагов: от простого вопроса до off-topic («не знаю»).
+        4 шага: простой → средний → сложный → off-topic.
+        На CPU ~3–4 мин на шаг (~15 мин на весь сценарий).
       </p>
+      <div id="last-run-banner" class="modes-compare__summary hidden"></div>
       <div class="rag-panel__actions local-llm-actions">
         <button id="demo-run-all-btn" class="rag-panel__btn rag-panel__btn--primary" type="button">
-          Запустить весь сценарий
+          Запустить весь сценарий (в фоне)
         </button>
       </div>
       <div id="demo-scenarios" class="local-llm-scenarios"></div>
@@ -56,39 +58,15 @@
       </label>
       <div class="rag-panel__actions">
         <button id="compare-btn" class="rag-panel__btn rag-panel__btn--primary" type="button">
-          Сравнить LOCAL vs CLOUD
+          Сравнить BASELINE vs OPTIMIZED
         </button>
-        <button id="local-only-btn" class="rag-panel__btn" type="button">Только LOCAL</button>
-        <button id="eval-btn" class="rag-panel__btn" type="button">Eval (10 вопросов)</button>
       </div>
       <p id="query-status" class="rag-panel__hint"></p>
     </section>
 
     <section id="compare-section" class="rag-panel hidden">
-      <h2 class="rag-panel__title">Статистика сравнения</h2>
+      <h2 class="rag-panel__title">Результат сравнения</h2>
       <div id="compare-stats" class="compare-table-wrap"></div>
-    </section>
-
-    <section id="eval-section" class="rag-panel hidden">
-      <h2 class="rag-panel__title">Eval: качество · скорость · стабильность</h2>
-      <div id="eval-summary" class="modes-compare__summary"></div>
-      <div class="compare-table-wrap">
-        <table class="eval-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Вопрос</th>
-              <th>LOCAL ms</th>
-              <th>CLOUD ms</th>
-              <th>LOCAL src</th>
-              <th>CLOUD src</th>
-            </tr>
-          </thead>
-          <tbody id="eval-table-body">
-            <tr><td colspan="6" class="eval-table__empty">Запустите eval</td></tr>
-          </tbody>
-        </table>
-      </div>
     </section>
   </main>
 

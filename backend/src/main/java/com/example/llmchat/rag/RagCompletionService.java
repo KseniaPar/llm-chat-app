@@ -2,6 +2,7 @@ package com.example.llmchat.rag;
 
 import com.example.llmchat.agent.CompletionResult;
 import com.example.llmchat.agent.OpenRouterHttpClient;
+import com.example.llmchat.localllm.LocalLlmProfile;
 import com.example.llmchat.localllm.LocalLlmService;
 import com.example.llmchat.localllm.OllamaHttpClient;
 import org.springframework.beans.factory.annotation.Value;
@@ -50,6 +51,74 @@ public class RagCompletionService {
             return completeLocal(messages);
         }
         return completeCloud(messages);
+    }
+
+    public RagLlmCompletionResult completeWithProfile(
+            List<OpenRouterHttpClient.ChatMessage> messages,
+            LocalLlmProfile profile) {
+        var status = localLlmService.checkStatus();
+        if (!status.online()) {
+            return RagLlmCompletionResult.failure(
+                    RagLlmProvider.LOCAL,
+                    profile.model(),
+                    0,
+                    status.message());
+        }
+        if (!isModelAvailable(status.installedModels(), profile.model())) {
+            return RagLlmCompletionResult.failure(
+                    RagLlmProvider.LOCAL,
+                    profile.model(),
+                    0,
+                    "Модель " + profile.model() + " не найдена. Выполните: ollama pull " + profile.model());
+        }
+
+        List<OllamaHttpClient.ChatMessage> ollamaMessages = messages.stream()
+                .map(message -> new OllamaHttpClient.ChatMessage(message.role(), message.content()))
+                .toList();
+
+        long startedAt = System.currentTimeMillis();
+        try {
+            OllamaHttpClient.ChatResult result = ollamaHttpClient.chatMessages(
+                    ollamaMessages,
+                    profile.model(),
+                    profile.temperature(),
+                    profile.maxTokens(),
+                    profile.contextWindow());
+            long durationMs = System.currentTimeMillis() - startedAt;
+            String content = result.content() != null ? result.content().trim() : "";
+            if (content.isBlank()) {
+                return RagLlmCompletionResult.failure(
+                        RagLlmProvider.LOCAL,
+                        profile.model(),
+                        durationMs,
+                        "Локальная модель вернула пустой ответ.");
+            }
+            return RagLlmCompletionResult.success(
+                    content,
+                    RagLlmProvider.LOCAL,
+                    profile.model(),
+                    durationMs,
+                    result.evalCount());
+        } catch (Exception exception) {
+            long durationMs = System.currentTimeMillis() - startedAt;
+            return RagLlmCompletionResult.failure(
+                    RagLlmProvider.LOCAL,
+                    profile.model(),
+                    durationMs,
+                    exception.getMessage());
+        }
+    }
+
+    private static boolean isModelAvailable(List<String> installedModels, String model) {
+        if (installedModels == null || model == null || model.isBlank()) {
+            return false;
+        }
+        for (String installed : installedModels) {
+            if (installed != null && (installed.equals(model) || installed.startsWith(model + ":"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public String cloudModel() {
