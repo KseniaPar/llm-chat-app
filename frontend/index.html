@@ -3,73 +3,53 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>День 29 — Оптимизация локальной LLM</title>
+  <title>Вопросы о православной вере</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/rag.css">
+  <link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/ai-server.css">
 </head>
 <body>
-  <main class="rag-app rag-app--local-llm">
-    <header class="rag-app__header">
-      <span class="rag-app__badge">Day 29</span>
-      <h1 class="rag-app__title">Оптимизация локальной LLM</h1>
-      <p class="rag-app__desc" id="demo-description">
-        Сравнение базовой и оптимизированной конфигурации Ollama для RAG-ассистента.
-      </p>
-    </header>
-
-    <section class="rag-panel">
-      <h2 class="rag-panel__title">Профили</h2>
-      <div class="local-llm-status">
-        <span id="status-dot" class="status-dot status-dot--offline" aria-hidden="true"></span>
+  <div class="ai-server">
+    <header class="ai-server__header">
+      <div class="ai-server__brand">
+        <div class="ai-server__mark" aria-hidden="true"></div>
         <div>
-          <p id="status-message" class="local-llm-status__message">Загрузка…</p>
-          <p id="baseline-meta" class="local-llm-status__meta"></p>
-          <p id="optimized-meta" class="local-llm-status__meta"></p>
+          <h1 class="ai-server__title">Вопросы о православной вере</h1>
+          <p id="model-label" class="ai-server__tagline">учебный собеседник · локально</p>
         </div>
       </div>
-      <p id="use-case" class="rag-panel__hint"></p>
-      <p id="index-status" class="rag-panel__hint"></p>
-    </section>
+      <div class="ai-server__actions">
+        <span id="status-pill" class="ai-server__pill ai-server__pill--offline">недоступен</span>
+        <button id="new-chat-btn" class="ai-server__btn" type="button">Новый разговор</button>
+      </div>
+    </header>
 
-    <section class="rag-panel">
-      <h2 class="rag-panel__title">Сценарий сравнения</h2>
-      <p class="rag-panel__hint">
-        4 шага: простой → средний → сложный → off-topic.
-        На CPU ~3–4 мин на шаг (~15 мин на весь сценарий).
+    <main id="messages" class="ai-server__messages" aria-live="polite"></main>
+
+    <footer class="ai-server__footer">
+      <p class="ai-server__disclaimer">
+        Учебный локальный собеседник. Не является священнослужителем и не заменяет
+        Таинства Церкви. По личным духовным вопросам обращайтесь к священнику вашего прихода.
       </p>
-      <div id="last-run-banner" class="modes-compare__summary hidden"></div>
-      <div class="rag-panel__actions local-llm-actions">
-        <button id="demo-run-all-btn" class="rag-panel__btn rag-panel__btn--primary" type="button">
-          Запустить весь сценарий (в фоне)
+      <p id="error" class="ai-server__error hidden" role="alert"></p>
+      <form id="chat-form" class="ai-server__composer">
+        <textarea
+          id="prompt"
+          class="ai-server__input"
+          rows="1"
+          placeholder="Короткий вопрос о вере…"
+          autocomplete="off"
+        ></textarea>
+        <button id="send-btn" class="ai-server__send" type="submit" aria-label="Отправить">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 2 11 13M22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
         </button>
-      </div>
-      <div id="demo-scenarios" class="local-llm-scenarios"></div>
-      <div id="demo-summary" class="modes-compare__summary hidden"></div>
-      <p id="demo-status" class="rag-panel__hint"></p>
-    </section>
-
-    <section class="rag-panel">
-      <label class="rag-panel__label">
-        Вопрос по корпусу «Основы православия»
-        <textarea id="question-input" class="rag-panel__input" rows="3"
-          placeholder="Например: Перечислите семь Таинств Православной Церкви…"></textarea>
-      </label>
-      <div class="rag-panel__actions">
-        <button id="compare-btn" class="rag-panel__btn rag-panel__btn--primary" type="button">
-          Сравнить BASELINE vs OPTIMIZED
-        </button>
-      </div>
-      <p id="query-status" class="rag-panel__hint"></p>
-    </section>
-
-    <section id="compare-section" class="rag-panel hidden">
-      <h2 class="rag-panel__title">Результат сравнения</h2>
-      <div id="compare-stats" class="compare-table-wrap"></div>
-    </section>
-  </main>
-
+      </form>
+      <p id="meta" class="ai-server__meta"></p>
+    </footer>
+  </div>
   <script type="module" src="/js/app.js"></script>
 </body>
 </html>

@@ -1,0 +1,39 @@
+app:
+  llm:
+    provider: local
+  platform:
+    name: "Вопросы о православной вере"
+    description: |
+      Локальный православный чат-собеседник на Ollama.
+      Ответы формируются на вашем сервере; облачные LLM не используются.
+    demo-user:
+      enabled: ${PLATFORM_DEMO_ENABLED:false}
+      username: ${PLATFORM_DEMO_USER:student}
+      password: ${PLATFORM_DEMO_PASSWORD:student}
+  openrouter:
+    api-key: ${OPENROUTER_API_KEY:local-llm-not-used}
+  mcp:
+    enabled: false
+  local-llm:
+    model: ${LOCAL_LLM_MODEL:qwen2.5:7b}
+    base-url: http://127.0.0.1:11434
+    service:
+      api-key: ${LOCAL_LLM_API_KEY:}
+      rate-limit-per-minute: 20
+      max-prompt-chars: 2000
+      max-concurrent-requests: 2
+      max-tokens: 160
+      temperature: 0.3
+  rag:
+    local:
+      auto-index-on-startup: true
+      warmup-on-ready: true
+      embedding-model: ${RAG_EMBED_MODEL:nomic-embed-text}
+
+server:
+  address: 127.0.0.1
+  port: 8080
+
+logging:
+  file:
+    name: /var/log/llm-chat/app.log

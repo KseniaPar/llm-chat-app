@@ -245,7 +245,7 @@ public class ChatAgent {
 
         boolean estimatedOverflow = tokenCounter.exceedsContextWindow(requestTokensEstimate);
         if (estimatedOverflow) {
-            logs.add("Оценка промпта превышает окно модели — запрос всё равно уходит в OpenRouter.");
+            logs.add("Оценка промпта превышает окно модели — запрос всё равно уходит в LLM.");
         }
 
         AgentChatCompletionService.AgentChatResult completion =

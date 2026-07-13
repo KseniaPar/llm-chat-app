@@ -69,6 +69,15 @@ public class LocalLlmService {
     }
 
     public LocalLlmChatResponse chat(String prompt) {
+        return chatWithSystem(null, prompt);
+    }
+
+    public LocalLlmChatResponse chatWithSystem(String systemPrompt, String prompt) {
+        return chatWithSystem(systemPrompt, prompt, temperature, maxTokens);
+    }
+
+    public LocalLlmChatResponse chatWithSystem(
+            String systemPrompt, String prompt, double temperatureOverride, int maxTokensOverride) {
         if (!enabled) {
             throw new IllegalStateException("Локальная LLM отключена.");
         }
@@ -77,7 +86,18 @@ public class LocalLlmService {
         }
 
         long startedAt = System.currentTimeMillis();
-        OllamaHttpClient.ChatResult result = ollamaHttpClient.chat(prompt.trim(), model, temperature, maxTokens);
+        OllamaHttpClient.ChatResult result;
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
+            result = ollamaHttpClient.chatMessages(
+                    List.of(
+                            new OllamaHttpClient.ChatMessage("system", systemPrompt.trim()),
+                            new OllamaHttpClient.ChatMessage("user", prompt.trim())),
+                    model,
+                    temperatureOverride,
+                    maxTokensOverride);
+        } else {
+            result = ollamaHttpClient.chat(prompt.trim(), model, temperatureOverride, maxTokensOverride);
+        }
         long durationMs = System.currentTimeMillis() - startedAt;
 
         return new LocalLlmChatResponse(
