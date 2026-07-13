@@ -157,6 +157,15 @@ public class OllamaHttpClient {
     }
 
     public ChatResult chatMessages(List<ChatMessage> messages, String model, double temperature, int maxTokens) {
+        return chatMessages(messages, model, temperature, maxTokens, null);
+    }
+
+    public ChatResult chatMessages(
+            List<ChatMessage> messages,
+            String model,
+            double temperature,
+            int maxTokens,
+            Integer contextWindow) {
         if (messages == null || messages.isEmpty()) {
             throw new IllegalArgumentException("messages must not be empty");
         }
@@ -173,14 +182,19 @@ public class OllamaHttpClient {
             throw new IllegalArgumentException("messages must contain at least one non-blank message");
         }
 
+        Map<String, Object> options = new LinkedHashMap<>();
+        options.put("temperature", temperature);
+        options.put("num_predict", maxTokens);
+        if (contextWindow != null && contextWindow > 0) {
+            options.put("num_ctx", contextWindow);
+        }
+
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         body.put("messages", ollamaMessages);
         body.put("stream", false);
         body.put("keep_alive", "30m");
-        body.put("options", Map.of(
-                "temperature", temperature,
-                "num_predict", maxTokens));
+        body.put("options", options);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);

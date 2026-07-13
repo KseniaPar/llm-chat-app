@@ -1,7 +1,10 @@
 package com.example.llmchat.rag;
 
 import com.example.llmchat.agent.OpenRouterHttpClient;
+import com.example.llmchat.dto.LocalLlmOptimizationCompareResponse;
+import com.example.llmchat.dto.LocalLlmOptimizationSummaryDto;
 import com.example.llmchat.dto.RagChatMessageDto;
+import com.example.llmchat.localllm.LocalLlmProfile;
 import com.example.llmchat.dto.RagDialogMemoryDto;
 import com.example.llmchat.dto.RagLlmCompareResponse;
 import com.example.llmchat.dto.RagModeCompareResponse;
@@ -189,6 +192,77 @@ public class RagQueryService {
                         Boolean.TRUE.equals(cloud.generationSuccess()),
                         qualityNote,
                         buildStabilityNote(local, cloud)));
+    }
+
+    public LocalLlmOptimizationCompareResponse compareLocalProfiles(
+            String question,
+            LocalLlmProfile baseline,
+            LocalLlmProfile optimized,
+            ChunkingStrategy strategy,
+            Integer topK,
+            Double minSimilarity,
+            List<String> expectedSources) {
+        long retrievalStarted = System.currentTimeMillis();
+        RagRetrievalService.RetrievalResult retrieval = retrievalService.retrieve(
+                question,
+                strategy,
+                RagRetrievalMode.FILTERED,
+                topK,
+                minSimilarity,
+                RagStack.LOCAL);
+        long retrievalDurationMs = System.currentTimeMillis() - retrievalStarted;
+
+        RagQueryResponse baselineResponse = buildRagResponseWithProfile(
+                question, retrieval, baseline, retrievalDurationMs);
+        RagQueryResponse optimizedResponse = buildRagResponseWithProfile(
+                question, retrieval, optimized, retrievalDurationMs);
+
+        long baselineMs = baselineResponse.generationDurationMs() != null ? baselineResponse.generationDurationMs() : 0;
+        long optimizedMs = optimizedResponse.generationDurationMs() != null
+                ? optimizedResponse.generationDurationMs()
+                : 0;
+        long baselineTokens = baselineResponse.tokenCount() != null ? baselineResponse.tokenCount() : 0;
+        long optimizedTokens = optimizedResponse.tokenCount() != null ? optimizedResponse.tokenCount() : 0;
+
+        String speedWinner;
+        if (!Boolean.TRUE.equals(baselineResponse.generationSuccess())
+                && !Boolean.TRUE.equals(optimizedResponse.generationSuccess())) {
+            speedWinner = "—";
+        } else if (!Boolean.TRUE.equals(baselineResponse.generationSuccess())) {
+            speedWinner = "OPTIMIZED";
+        } else if (!Boolean.TRUE.equals(optimizedResponse.generationSuccess())) {
+            speedWinner = "BASELINE";
+        } else if (optimizedMs < baselineMs) {
+            speedWinner = "OPTIMIZED";
+        } else if (baselineMs < optimizedMs) {
+            speedWinner = "BASELINE";
+        } else {
+            speedWinner = "TIE";
+        }
+
+        int baselineMatches = countExpectedSourceMatches(expectedSources, baselineResponse);
+        int optimizedMatches = countExpectedSourceMatches(expectedSources, optimizedResponse);
+        String qualityNote = buildOptimizationQualityNote(
+                baselineResponse, optimizedResponse, baselineMatches, optimizedMatches);
+        String resourceNote = buildResourceNote(baselineMs, optimizedMs, baselineTokens, optimizedTokens);
+
+        return new LocalLlmOptimizationCompareResponse(
+                question,
+                baselineResponse,
+                optimizedResponse,
+                new LocalLlmOptimizationSummaryDto(
+                        baselineMs,
+                        optimizedMs,
+                        retrievalDurationMs,
+                        speedWinner,
+                        baselineTokens,
+                        optimizedTokens,
+                        resourceNote,
+                        baselineMatches,
+                        optimizedMatches,
+                        qualityNote,
+                        Boolean.TRUE.equals(baselineResponse.generationSuccess()),
+                        Boolean.TRUE.equals(optimizedResponse.generationSuccess())));
     }
 
     public RagQueryCompareResponse compare(String question, ChunkingStrategy strategy, Integer topK) {
@@ -398,6 +472,139 @@ public class RagQueryService {
                 completion.tokenCount(),
                 completion.success(),
                 completion.errorMessage());
+    }
+
+    private RagQueryResponse buildRagResponseWithProfile(
+            String question,
+            RagRetrievalService.RetrievalResult retrieval,
+            LocalLlmProfile profile,
+            long retrievalDurationMs) {
+        RagRetrievalMetaDto meta = toMeta(retrieval);
+        RagConfidence confidence = relevanceGuard.assess(retrieval);
+
+        if (relevanceGuard.shouldRefuse(confidence)) {
+            return new RagQueryResponse(
+                    RagRelevanceGuard.UNKNOWN_ANSWER.trim(),
+                    List.of(),
+                    retrieval.mode().name(),
+                    meta,
+                    List.of(),
+                    List.of(),
+                    RagConfidence.UNKNOWN.name(),
+                    RagLlmProvider.LOCAL,
+                    profile.model(),
+                    retrievalDurationMs,
+                    0L,
+                    0L,
+                    true,
+                    null);
+        }
+
+        List<RagRetrievalService.ScoredChunk> chunks = retrieval.chunks();
+        RagCitationBuilder.CitationBundle citations = citationBuilder.build(
+                retrieval.originalQuery(), retrieval.searchQuery(), chunks);
+        java.util.Map<String, String> quoteByChunkId = citations.quotes().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        q -> q.chunkId(),
+                        q -> q.text(),
+                        (left, right) -> left,
+                        java.util.LinkedHashMap::new));
+        List<RagQueryResponse.ChunkUsedDto> used = chunks.stream()
+                .map(chunk -> toChunkUsed(chunk, quoteByChunkId.get(chunk.chunkId())))
+                .toList();
+
+        String contextBlock = buildContextBlock(chunks);
+        String userMessage = contextBlock + "\n\nВопрос: " + question;
+        String systemPrompt = profile.systemPrompt() != null && !profile.systemPrompt().isBlank()
+                ? profile.systemPrompt()
+                : RAG_SYSTEM_PROMPT;
+
+        RagLlmCompletionResult completion = completionService.completeWithProfile(
+                List.of(
+                        new OpenRouterHttpClient.ChatMessage("system", systemPrompt),
+                        new OpenRouterHttpClient.ChatMessage("user", userMessage)),
+                profile);
+
+        String answer = completion.success()
+                ? completion.content()
+                : "Ошибка генерации (LOCAL/" + profile.label() + "): " + completion.errorMessage();
+
+        return new RagQueryResponse(
+                answer,
+                used,
+                retrieval.mode().name(),
+                meta,
+                citations.sources(),
+                citations.quotes(),
+                confidence.name(),
+                RagLlmProvider.LOCAL,
+                completion.model(),
+                retrievalDurationMs,
+                completion.durationMs(),
+                completion.tokenCount(),
+                completion.success(),
+                completion.errorMessage());
+    }
+
+    private static int countExpectedSourceMatches(List<String> expectedSources, RagQueryResponse response) {
+        if (expectedSources == null || expectedSources.isEmpty()) {
+            return "UNKNOWN".equalsIgnoreCase(response.confidence()) ? 1 : 0;
+        }
+        if (response.answer() == null) {
+            return 0;
+        }
+        int hits = 0;
+        String answerLower = response.answer().toLowerCase(Locale.ROOT);
+        for (String expected : expectedSources) {
+            if (answerLower.contains(expected.toLowerCase(Locale.ROOT))) {
+                hits++;
+                continue;
+            }
+            for (var source : response.sources()) {
+                String section = source.section() != null ? source.section().toLowerCase(Locale.ROOT) : "";
+                if (section.contains(expected.toLowerCase(Locale.ROOT))) {
+                    hits++;
+                    break;
+                }
+            }
+        }
+        return hits;
+    }
+
+    private static String buildOptimizationQualityNote(
+            RagQueryResponse baseline,
+            RagQueryResponse optimized,
+            int baselineMatches,
+            int optimizedMatches) {
+        if (!Boolean.TRUE.equals(baseline.generationSuccess())
+                && !Boolean.TRUE.equals(optimized.generationSuccess())) {
+            return "Обе конфигурации вернули ошибку.";
+        }
+        if (optimizedMatches > baselineMatches) {
+            return "Оптимизированная: больше совпадений с ожидаемыми терминами ("
+                    + optimizedMatches + " vs " + baselineMatches + ").";
+        }
+        if (baselineMatches > optimizedMatches) {
+            return "Базовая: больше совпадений (" + baselineMatches + " vs " + optimizedMatches + ").";
+        }
+        String baselineConf = baseline.confidence() != null ? baseline.confidence() : "—";
+        String optimizedConf = optimized.confidence() != null ? optimized.confidence() : "—";
+        return "Одинаковое качество по терминам (" + baselineMatches + "); confidence BASELINE="
+                + baselineConf + ", OPTIMIZED=" + optimizedConf + ".";
+    }
+
+    private static String buildResourceNote(
+            long baselineMs,
+            long optimizedMs,
+            long baselineTokens,
+            long optimizedTokens) {
+        double speedRatio = baselineMs > 0 ? (double) baselineMs / Math.max(optimizedMs, 1) : 1.0;
+        double tokenRatio = baselineTokens > 0 ? (double) baselineTokens / Math.max(optimizedTokens, 1) : 1.0;
+        return String.format(
+                Locale.ROOT,
+                "Скорость: %.1fx, токены: %.1fx (меньше — экономнее).",
+                speedRatio,
+                tokenRatio);
     }
 
     private static RagStack stackFor(RagLlmProvider provider) {
