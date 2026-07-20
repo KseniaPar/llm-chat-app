@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exam Prep · llm-chat-app</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/exam.css">
+</head>
+<body>
+  <div class="exam-app">
+    <header class="exam-app__header">
+      <div class="exam-app__brand">
+        <div class="exam-app__logo" aria-hidden="true">ex</div>
+        <div>
+          <h1 class="exam-app__title">Подготовка к экзамену</h1>
+          <p id="exam-tagline" class="exam-app__tagline">лекции · конспекты · ответы с цитатами</p>
+        </div>
+      </div>
+      <div class="exam-app__header-actions">
+        <span id="exam-status-pill" class="exam-app__pill exam-app__pill--offline">загрузка…</span>
+        <a href="/files.html" class="exam-app__link">Files</a>
+        <a href="/support.html" class="exam-app__link">Support</a>
+        <a href="/dev.html" class="exam-app__link">DevAssist</a>
+        <a href="/" class="exam-app__link">На главную</a>
+        <button id="exam-new-chat-btn" class="exam-app__btn exam-app__btn--accent" type="button">Новый диалог</button>
+      </div>
+    </header>
+
+    <div class="exam-app__layout">
+      <aside class="exam-app__sidebar" aria-label="Лекции">
+        <section class="exam-app__panel">
+          <h2 class="exam-app__panel-title">Добавить лекцию</h2>
+          <p class="exam-app__panel-hint">MP3 или M4A с рабочего стола — конспект создастся сам.</p>
+          <form id="exam-upload-form" class="exam-app__upload">
+            <label class="exam-app__file-label">
+              <input id="exam-file" type="file" accept="audio/*,.mp3,.m4a,.wav,.ogg" />
+              <span class="exam-app__file-icon" aria-hidden="true">🎧</span>
+              <span id="exam-file-label" class="exam-app__file-text">Нажмите, чтобы выбрать файл</span>
+            </label>
+            <input id="exam-title" class="exam-app__input-sm" type="text" placeholder="Название (необязательно)" />
+            <input id="exam-subject" class="exam-app__input-sm" type="text" placeholder="Предмет, напр. феноменология" />
+            <button id="exam-upload-btn" class="exam-app__btn exam-app__btn--primary" type="submit">Загрузить лекцию</button>
+          </form>
+        </section>
+
+        <section class="exam-app__panel">
+          <h2 class="exam-app__panel-title">Мои лекции</h2>
+          <div id="exam-job-list" class="exam-app__jobs"></div>
+        </section>
+
+        <section class="exam-app__panel exam-app__panel--compact">
+          <h2 class="exam-app__panel-title">Корпус</h2>
+          <dl class="exam-app__stats">
+            <div><dt>Готово</dt><dd id="stat-ready">—</dd></div>
+            <div><dt>Фрагментов RAG</dt><dd id="stat-chunks">—</dd></div>
+          </dl>
+        </section>
+
+        <p class="exam-app__sidebar-note">
+          Во вкладке <strong>Чат</strong> задавайте вопросы по <em>всем</em> лекциям.
+          Во вкладке <strong>Лекция</strong> — транскрипт и конспект выбранной записи.
+        </p>
+      </aside>
+
+      <main class="exam-app__main">
+        <nav class="exam-app__tabs" aria-label="Раздел">
+          <button id="exam-tab-chat" type="button" class="exam-app__tab exam-app__tab--active" data-tab="chat">Чат</button>
+          <button id="exam-tab-lecture" type="button" class="exam-app__tab" data-tab="lecture">Лекция</button>
+        </nav>
+
+        <div id="exam-pane-chat" class="exam-app__pane exam-app__pane--active">
+          <div id="exam-messages" class="exam-app__messages" aria-live="polite"></div>
+          <footer class="exam-app__footer">
+            <p id="exam-context-label" class="exam-app__context">Вопросы ищутся по всем загруженным лекциям</p>
+            <p id="exam-error" class="exam-app__error hidden" role="alert"></p>
+            <form id="exam-chat-form" class="exam-app__composer">
+              <textarea
+                id="exam-prompt"
+                class="exam-app__input"
+                rows="1"
+                placeholder="Например: кто такой Рудольф Отто?"
+                autocomplete="off"
+              ></textarea>
+              <button id="exam-send-btn" class="exam-app__send" type="submit" aria-label="Отправить">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 2 11 13M22 2 15 22 11 13 2 9 22 2"/>
+                </svg>
+              </button>
+            </form>
+            <p id="exam-meta" class="exam-app__meta"></p>
+          </footer>
+        </div>
+
+        <div id="exam-pane-lecture" class="exam-app__pane">
+          <div id="exam-lecture-empty" class="exam-app__lecture-empty">
+            <p class="exam-app__lecture-empty-title">Лекция не выбрана</p>
+            <p>Выберите запись в списке слева, чтобы увидеть транскрипт и конспект.</p>
+          </div>
+          <section id="exam-lecture-panel" class="exam-app__lecture-panel hidden">
+            <div class="exam-app__lecture-head">
+              <div>
+                <h2 id="exam-lecture-title" class="exam-app__lecture-title">—</h2>
+                <p id="exam-lecture-status" class="exam-app__lecture-status"></p>
+              </div>
+              <button id="exam-conspect-btn" class="exam-app__btn exam-app__btn--accent" type="button" disabled>
+                Конспект лекции
+              </button>
+            </div>
+            <div id="exam-conspect-panel" class="exam-app__conspect hidden" aria-label="Конспект"></div>
+            <div class="exam-app__transcript-wrap">
+              <h3 class="exam-app__section-label">Транскрипт с таймкодами</h3>
+              <div id="exam-transcript-body" class="exam-app__transcript-body"></div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script type="module" src="/js/exam-app.js"></script>
+</body>
+</html>
