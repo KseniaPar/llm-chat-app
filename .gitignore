@@ -13,3 +13,9 @@ application-local.yml
 backend/src/main/resources/application-local.yml
 deploy/vps/.env
 data/
+
+# Day 32 local review artifacts
+pr.diff
+changed-files.txt
+review.md
+

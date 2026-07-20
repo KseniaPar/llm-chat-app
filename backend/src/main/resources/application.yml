@@ -45,6 +45,12 @@ app:
     api-key: ${OPENROUTER_API_KEY:local-llm-not-used}
     base-url: https://openrouter.ai/api
     model: openai/gpt-4o-mini
+  review:
+    use-project-rag: true
+    temperature: 0.2
+    max-tokens: 1800
+  support:
+    max-tokens: 1200
   devassist:
     llm-provider: cloud
     max-tokens: 1024
@@ -245,6 +251,9 @@ app:
     project-index-db: data/rag-project-index.db
     project-sources: ../README.md,../project/docs
     project-auto-index-on-startup: true
+    support-index-db: data/rag-support-index.db
+    support-sources: ../support/faq
+    support-auto-index-on-startup: true
     embedding-model: openai/text-embedding-3-small
     cloud:
       embedding-model: openai/text-embedding-3-small
