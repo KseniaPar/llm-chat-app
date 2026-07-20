@@ -59,6 +59,15 @@
 
 Frontend: `/dev.html` — не пересекается с учебным чатом (`/`).
 
+## AI Code Review (Day 32)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api/review/status` | Готовность (OpenRouter key) |
+| POST | `/api/review/analyze` | `{ title, diff?, changedFiles?, baseRef? }` → markdown ревью |
+
+CI: `.github/workflows/pr-review.yml` на `pull_request` → комментарий в PR.
+
 ## Профиль
 
 | Метод | Путь | Описание |

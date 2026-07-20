@@ -56,4 +56,5 @@ Stores (SQLite) · Ollama / OpenRouter · MCP STDIO servers
 
 - `LocalLlmPrivateService` — публичный учебный чат о православии (`/api/local-llm/service/*`)
 - `DeveloperAssistantService` — tool-calling агент (`/help`, `/api/devassist/chat`): сам вызывает `retrieveProjectDocs` + MCP git
+- `PrReviewService` — AI-ревью PR/diff (`/api/review/analyze`) + GitHub Action
 - `PlatformServerService` — info / verify платформы
