@@ -267,6 +267,10 @@ public class RagRetrievalService {
             return chunk.source();
         }
 
+        public String title() {
+            return chunk.title();
+        }
+
         public String section() {
             return chunk.section();
         }

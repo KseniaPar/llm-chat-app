@@ -10,16 +10,19 @@ public class RagIndexStore {
     private final RagIndexRepository cloud;
     private final RagIndexRepository project;
     private final RagIndexRepository support;
+    private final RagIndexRepository exam;
 
     public RagIndexStore(
             @Value("${app.rag.local.index-db:data/rag-index-local.db}") String localIndexDb,
             @Value("${app.rag.index-db:data/rag-index.db}") String cloudIndexDb,
             @Value("${app.rag.project-index-db:data/rag-project-index.db}") String projectIndexDb,
-            @Value("${app.rag.support-index-db:data/rag-support-index.db}") String supportIndexDb) {
+            @Value("${app.rag.support-index-db:data/rag-support-index.db}") String supportIndexDb,
+            @Value("${app.rag.exam-index-db:data/rag-exam-index.db}") String examIndexDb) {
         this.local = new RagIndexRepository(localIndexDb);
         this.cloud = new RagIndexRepository(cloudIndexDb);
         this.project = new RagIndexRepository(projectIndexDb);
         this.support = new RagIndexRepository(supportIndexDb);
+        this.exam = new RagIndexRepository(examIndexDb);
     }
 
     public RagIndexRepository forStack(RagStack stack) {
@@ -28,6 +31,7 @@ public class RagIndexStore {
             case CLOUD -> cloud;
             case PROJECT -> project;
             case SUPPORT -> support;
+            case EXAM -> exam;
         };
     }
 
@@ -47,6 +51,10 @@ public class RagIndexStore {
         return support;
     }
 
+    public RagIndexRepository exam() {
+        return exam;
+    }
+
     public String localPath() {
         return local.dbPath();
     }
@@ -61,5 +69,9 @@ public class RagIndexStore {
 
     public String supportPath() {
         return support.dbPath();
+    }
+
+    public String examPath() {
+        return exam.dbPath();
     }
 }

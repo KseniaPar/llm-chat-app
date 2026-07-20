@@ -122,6 +122,29 @@ curl -s http://localhost:8080/api/files/goal -H "Content-Type: application/json"
   -d "{\"goal\":\"Найди упоминания SupportController в backend и запиши отчёт в project/docs/usage-support.md\"}"
 ```
 
+## Exam Prep (Day 35)
+
+UI: **http://localhost:5173/exam.html**
+
+- Загрузка аудио лекции (MP3/M4A) → STT через OpenRouter Whisper
+- Транскрипт с таймкодами → RAG (`RagStack.EXAM`) → ответы с цитатами `@ mm:ss`
+- Конспект сохраняется в `data/exam-notes/`
+
+```bash
+# backend + OPENROUTER_API_KEY + Ollama (embeddings)
+
+curl -s http://localhost:8080/api/exam/status
+curl -s -F "file=@lecture.mp3" -F "title=Феноменология L1" -F "subject=феноменология" \
+  http://localhost:8080/api/exam/upload
+curl -s http://localhost:8080/api/exam/jobs
+curl -s http://localhost:8080/api/exam/chat -H "Content-Type: application/json" \
+  -d "{\"question\":\"Кто такой Рудольф Отто?\"}"
+curl -s http://localhost:8080/api/exam/conspect -H "Content-Type: application/json" \
+  -d "{\"jobId\":\"<id>\"}"
+```
+
+Демо-материалы: `C:\Users\user\Desktop\религиоведение\` (для записи — короткий MP3, не весь 200 МБ файл).
+
 ## Документация
 
 - [Архитектура](project/docs/architecture.md)
@@ -130,4 +153,5 @@ curl -s http://localhost:8080/api/files/goal -H "Content-Type: application/json"
 - [Схема данных](project/docs/data-schema.md)
 - [Поддержка](project/docs/support.md)
 - [Файловый ассистент](project/docs/file-assistant.md)
+- [Exam Prep](project/docs/exam-assistant.md)
 - [Деплой VPS](deploy/vps/README.md)

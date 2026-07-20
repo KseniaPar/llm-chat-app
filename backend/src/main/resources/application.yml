@@ -1,6 +1,10 @@
 spring:
   profiles:
     active: local
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
   application:
     name: llm-chat-app
   datasource:
@@ -54,6 +58,17 @@ app:
     max-tokens: 1200
   fileassist:
     max-tokens: 2000
+  exam:
+    max-tokens: 1600
+    transcription-model: openai/whisper-large-v3
+    max-upload-bytes: 104857600
+    chunk-max-bytes: 15728640
+    chunk-seconds: 600
+    ffmpeg-path: ffmpeg
+    ffprobe-path: ffprobe
+    audio-dir: data/exam-audio
+    transcript-dir: data/exam-transcripts
+    notes-dir: data/exam-notes
   devassist:
     llm-provider: cloud
     max-tokens: 1024
@@ -257,6 +272,7 @@ app:
     support-index-db: data/rag-support-index.db
     support-sources: ../support/faq
     support-auto-index-on-startup: false
+    exam-index-db: data/rag-exam-index.db
     embedding-model: openai/text-embedding-3-small
     cloud:
       embedding-model: openai/text-embedding-3-small
