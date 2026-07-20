@@ -29,6 +29,7 @@ import com.example.llmchat.rag.RagCorpusLoader;
 import com.example.llmchat.rag.RagDemoService;
 import com.example.llmchat.rag.RagEvalService;
 import com.example.llmchat.rag.RagLocalIndexService;
+import com.example.llmchat.rag.ProjectDocsIndexingService;
 import com.example.llmchat.rag.RagIndexStore;
 import com.example.llmchat.rag.RagIndexingService;
 import com.example.llmchat.rag.RagLlmEvalService;
@@ -70,6 +71,7 @@ public class RagController {
     private final RagLlmEvalService llmEvalService;
     private final RagLocalDemoService localDemoService;
     private final RagLocalIndexService localIndexService;
+    private final ProjectDocsIndexingService projectDocsIndexingService;
 
     public RagController(
             RagIndexingService indexingService,
@@ -82,7 +84,8 @@ public class RagController {
             RagScenarioLoader scenarioLoader,
             RagLlmEvalService llmEvalService,
             RagLocalDemoService localDemoService,
-            RagLocalIndexService localIndexService) {
+            RagLocalIndexService localIndexService,
+            ProjectDocsIndexingService projectDocsIndexingService) {
         this.indexingService = indexingService;
         this.indexStore = indexStore;
         this.corpusLoader = corpusLoader;
@@ -94,6 +97,22 @@ public class RagController {
         this.llmEvalService = llmEvalService;
         this.localDemoService = localDemoService;
         this.localIndexService = localIndexService;
+        this.projectDocsIndexingService = projectDocsIndexingService;
+    }
+
+    @PostMapping("/project/index")
+    public RagIndexResponse buildProjectIndex() {
+        log.info("POST /api/rag/project/index");
+        try {
+            return RagIndexResponse.from(projectDocsIndexingService.buildIndex());
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        }
+    }
+
+    @GetMapping("/project/index/status")
+    public ProjectDocsIndexingService.ProjectIndexStatus projectIndexStatus() {
+        return projectDocsIndexingService.status();
     }
 
     @GetMapping("/local/demo")

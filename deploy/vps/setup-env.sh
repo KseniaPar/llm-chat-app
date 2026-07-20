@@ -32,6 +32,7 @@ fi
 
 JWT_SECRET="$(rand_b64)"
 API_KEY="$(rand_hex)"
+SITE_PASS="$(openssl rand -base64 12 | tr -d '/+=' | head -c 14)"
 
 cp "$EXAMPLE" "$ENV_FILE"
 
@@ -40,10 +41,12 @@ if sed --version >/dev/null 2>&1; then
   sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|" "$ENV_FILE"
   sed -i "s|^LOCAL_LLM_API_KEY=.*|LOCAL_LLM_API_KEY=$API_KEY|" "$ENV_FILE"
   sed -i "s|^VITE_LOCAL_LLM_API_KEY=.*|VITE_LOCAL_LLM_API_KEY=$API_KEY|" "$ENV_FILE"
+  sed -i "s|^SITE_BASIC_AUTH_PASSWORD=.*|SITE_BASIC_AUTH_PASSWORD=$SITE_PASS|" "$ENV_FILE"
 else
   sed -i '' "s|^JWT_SECRET=.*|JWT_SECRET=$JWT_SECRET|" "$ENV_FILE"
   sed -i '' "s|^LOCAL_LLM_API_KEY=.*|LOCAL_LLM_API_KEY=$API_KEY|" "$ENV_FILE"
   sed -i '' "s|^VITE_LOCAL_LLM_API_KEY=.*|VITE_LOCAL_LLM_API_KEY=$API_KEY|" "$ENV_FILE"
+  sed -i '' "s|^SITE_BASIC_AUTH_PASSWORD=.*|SITE_BASIC_AUTH_PASSWORD=$SITE_PASS|" "$ENV_FILE"
 fi
 
 chmod 600 "$ENV_FILE"
@@ -52,5 +55,7 @@ if id "$APP_USER" >/dev/null 2>&1; then
 fi
 
 echo "==> Создан $ENV_FILE (права 600)"
+echo "    Логин на сайт: prihod"
+echo "    Пароль на сайт: $SITE_PASS  (сохраните — понадобится прихожанам)"
 echo "    Отредактируйте при необходимости: NGINX_SERVER_NAME, LOCAL_LLM_MODEL"
 echo "    Дальше: sudo bash deploy/vps/deploy-app.sh"

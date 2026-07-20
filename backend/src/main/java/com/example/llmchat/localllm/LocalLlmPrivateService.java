@@ -64,7 +64,7 @@ public class LocalLlmPrivateService {
         LocalLlmStatusResponse status = localLlmService.checkStatus();
         boolean online = status.online() && status.modelAvailable();
         String message = online
-                ? "Спроси про православие — локальный AI на Ollama."
+                ? "Православный собеседник готов — локальный AI на Ollama."
                 : status.message();
 
         return new LocalLlmServiceInfoResponse(

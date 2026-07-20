@@ -78,6 +78,7 @@ sudo bash deploy/vps/bootstrap.sh
 - **VpsStartupValidator** не даст запуститься с ключами `change-me-*`
 - **Rate limit** nginx: ~15 запросов/мин на IP
 - **Rate limit** приложения: 20 запросов/мин + лимит одновременных запросов
+- **Пароль на сайт** (nginx Basic Auth) — только для своих, см. `enable-site-password.sh`
 - **Демо-пользователь** агента выключен по умолчанию (`PLATFORM_DEMO_ENABLED=false`)
 
 ### Важно про API-ключ
@@ -117,6 +118,7 @@ bash deploy/vps/verify-vps.sh
 | `setup-env.sh` | Генерация `.env` со случайными секретами |
 | `deploy-app.sh` | Сборка + nginx + systemd |
 | `enable-https.sh` | Сертификат Let's Encrypt |
+| `enable-site-password.sh` | Пароль на вход на весь сайт |
 | `verify-vps.sh` | Проверка info + chat + закрытых API |
 | `env.example` | Шаблон переменных (без секретов) |
 | `.env` | **Ваши секреты — не коммитить** |

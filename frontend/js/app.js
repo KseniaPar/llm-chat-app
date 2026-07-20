@@ -1,12 +1,14 @@
+import { PRODUCT_NAME, PRODUCT_TAGLINE } from './product.js';
+
 const WELCOME_HTML = `
   <div class="ai-server__welcome">
-    <p class="ai-server__welcome-title">Вопросы о православной вере</p>
+    <p class="ai-server__welcome-title">${PRODUCT_NAME}</p>
     <p class="ai-server__welcome-text">
-      Спокойный разговор о вере, Церкви, таинствах, молитве и духовной жизни.
+      Основной продукт платформы — спокойный разговор о вере, Церкви, таинствах, молитве и духовной жизни.
       Ответы формируются локально на вашем сервере.
     </p>
     <p class="ai-server__welcome-note">
-      Это учебный собеседник, а не священник. По личным духовным вопросам
+      Это AI-собеседник, а не священник. По личным духовным вопросам
       лучше обратиться к приходскому священнослужителю.
     </p>
     <p class="ai-server__welcome-note">Короткие вопросы отвечают быстрее.</p>
@@ -127,7 +129,7 @@ async function loadStatus() {
   try {
     const info = await api('/api/local-llm/service/info');
     ready = info.online && info.modelAvailable;
-    modelLabel.textContent = 'учебный собеседник · локально';
+    modelLabel.textContent = PRODUCT_TAGLINE;
     statusPill.textContent = ready ? 'готов' : 'недоступен';
     statusPill.className = `ai-server__pill ai-server__pill--${ready ? 'online' : 'offline'}`;
     if (!ready) showError(info.message);
@@ -167,7 +169,7 @@ async function sendMessage(prompt) {
     if (data.durationMs > 0) {
       metaEl.textContent = `ответ сформирован локально · ${data.durationMs} мс`;
     } else {
-      metaEl.textContent = 'вопрос вне темы собеседника';
+      metaEl.textContent = 'вопрос вне темы продукта';
     }
   } catch (err) {
     hideTyping();

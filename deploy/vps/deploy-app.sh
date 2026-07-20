@@ -35,6 +35,10 @@ API_KEY="${LOCAL_LLM_API_KEY:-}"
 VITE_KEY="${VITE_LOCAL_LLM_API_KEY:-$API_KEY}"
 
 chmod 600 "$ENV_FILE"
+if ! id "$APP_USER" >/dev/null 2>&1; then
+  useradd --system --home-dir "$APP_ROOT" --shell /usr/sbin/nologin "$APP_USER"
+fi
+mkdir -p "$APP_ROOT/data" /var/log/llm-chat
 chown "$APP_USER:$APP_USER" "$ENV_FILE" 2>/dev/null || true
 
 echo "==> Сборка backend"
@@ -53,8 +57,23 @@ ollama pull "$EMBED_MODEL"
 
 echo "==> nginx"
 cp "$APP_ROOT/deploy/vps/nginx-rate-limit.conf" /etc/nginx/conf.d/llm-chat-rate-limit.conf
+
+SITE_AUTH_ENABLED="${SITE_BASIC_AUTH_ENABLED:-true}"
+SITE_AUTH_USER="${SITE_BASIC_AUTH_USER:-prihod}"
+SITE_AUTH_PASS="${SITE_BASIC_AUTH_PASSWORD:-}"
+if [[ "$SITE_AUTH_ENABLED" == "true" && -n "$SITE_AUTH_PASS" && "$SITE_AUTH_PASS" != "change-me-site-access" ]]; then
+  DEBIAN_FRONTEND=noninteractive apt-get install -y apache2-utils
+  htpasswd -cb /etc/nginx/llm-chat-htpasswd "$SITE_AUTH_USER" "$SITE_AUTH_PASS"
+  chmod 640 /etc/nginx/llm-chat-htpasswd
+  chown root:www-data /etc/nginx/llm-chat-htpasswd
+  SITE_AUTH_BLOCK=$'    auth_basic "Доступ для прихожан";\n    auth_basic_user_file /etc/nginx/llm-chat-htpasswd;'
+else
+  SITE_AUTH_BLOCK="    # basic auth выключен"
+fi
+
 sed -e "s|NGINX_SERVER_NAME_PLACEHOLDER|$NGINX_NAME|g" \
     -e "s|APP_ROOT_PLACEHOLDER|$APP_ROOT|g" \
+    -e "s|SITE_AUTH_PLACEHOLDER|$SITE_AUTH_BLOCK|g" \
     "$APP_ROOT/deploy/vps/nginx-llm-chat.conf" > /etc/nginx/sites-available/llm-chat
 ln -sf /etc/nginx/sites-available/llm-chat /etc/nginx/sites-enabled/llm-chat
 rm -f /etc/nginx/sites-enabled/default
@@ -83,6 +102,9 @@ echo ""
 echo "==> Готово: http://$PUBLIC_IP/"
 if [[ "$NGINX_NAME" != "_" ]]; then
   echo "           http://$NGINX_NAME/"
+fi
+if [[ "$SITE_AUTH_ENABLED" == "true" && -n "$SITE_AUTH_PASS" && "$SITE_AUTH_PASS" != "change-me-site-access" ]]; then
+  echo "    Вход на сайт: $SITE_AUTH_USER / (пароль из deploy/vps/.env → SITE_BASIC_AUTH_PASSWORD)"
 fi
 echo "    Логи: journalctl -u llm-chat -f"
 echo "    HTTPS: sudo bash deploy/vps/enable-https.sh <домен>"

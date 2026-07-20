@@ -31,7 +31,7 @@ app:
   llm:
     provider: ${LLM_PROVIDER:local}
   mcp:
-    enabled: false
+    enabled: true
     sandbox:
       relative-path: data/mcp-sandbox
   scheduler:
@@ -45,6 +45,9 @@ app:
     api-key: ${OPENROUTER_API_KEY:local-llm-not-used}
     base-url: https://openrouter.ai/api
     model: openai/gpt-4o-mini
+  devassist:
+    llm-provider: cloud
+    max-tokens: 1024
   agent:
     conversation-store-path: data/conversations.json
     system-prompt: |
@@ -239,6 +242,9 @@ app:
   rag:
     corpus-dir: data/rag-corpus
     index-db: data/rag-index.db
+    project-index-db: data/rag-project-index.db
+    project-sources: ../README.md,../project/docs
+    project-auto-index-on-startup: true
     embedding-model: openai/text-embedding-3-small
     cloud:
       embedding-model: openai/text-embedding-3-small
