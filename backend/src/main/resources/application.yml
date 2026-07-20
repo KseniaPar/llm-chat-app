@@ -31,7 +31,8 @@ app:
   llm:
     provider: ${LLM_PROVIDER:local}
   mcp:
-    enabled: true
+    enabled: false
+    active-servers: files
     sandbox:
       relative-path: data/mcp-sandbox
   scheduler:
@@ -51,6 +52,8 @@ app:
     max-tokens: 1800
   support:
     max-tokens: 1200
+  fileassist:
+    max-tokens: 2000
   devassist:
     llm-provider: cloud
     max-tokens: 1024
@@ -250,10 +253,10 @@ app:
     index-db: data/rag-index.db
     project-index-db: data/rag-project-index.db
     project-sources: ../README.md,../project/docs
-    project-auto-index-on-startup: true
+    project-auto-index-on-startup: false
     support-index-db: data/rag-support-index.db
     support-sources: ../support/faq
-    support-auto-index-on-startup: true
+    support-auto-index-on-startup: false
     embedding-model: openai/text-embedding-3-small
     cloud:
       embedding-model: openai/text-embedding-3-small

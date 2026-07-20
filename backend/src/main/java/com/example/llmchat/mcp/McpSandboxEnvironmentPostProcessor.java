@@ -20,7 +20,7 @@ import java.util.stream.Stream;
 
 /**
  * Prepares MCP sandbox directory and generates Claude Desktop-style stdio config
- * for filesystem, mcp-study, mcp-scheduler, mcp-pipeline, mcp-git, and mcp-tickets.
+ * for filesystem, mcp-study, mcp-scheduler, mcp-pipeline, mcp-git, mcp-tickets, and mcp-files.
  */
 public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProcessor {
 
@@ -32,6 +32,8 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
     private static final String PIPELINE_OUTPUT_ABSOLUTE_KEY = "app.mcp.pipeline-output.absolute";
     private static final String GIT_REPO_ABSOLUTE_KEY = "app.mcp.git-repo.absolute";
     private static final String TICKETS_DIR_ABSOLUTE_KEY = "app.mcp.tickets-dir.absolute";
+    private static final String FILE_REPO_ABSOLUTE_KEY = "app.mcp.file-repo.absolute";
+    private static final String ACTIVE_SERVERS_KEY = "app.mcp.active-servers";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -79,6 +81,9 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
         ModuleLaunch gitLaunch = resolveModuleLaunch("mcp-git", "com.example.mcp.git.GitMcpApplication");
         ModuleLaunch ticketsLaunch =
                 resolveModuleLaunch("mcp-tickets", "com.example.mcp.tickets.TicketsMcpApplication");
+        ModuleLaunch filesLaunch =
+                resolveModuleLaunch("mcp-files", "com.example.mcp.files.FilesMcpApplication");
+        java.util.Set<String> activeServers = parseActiveServers(environment.getProperty(ACTIVE_SERVERS_KEY, ""));
         try {
             writeServersConfig(
                     configFile,
@@ -92,7 +97,9 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
                     schedulerLaunch,
                     pipelineLaunch,
                     gitLaunch,
-                    ticketsLaunch);
+                    ticketsLaunch,
+                    filesLaunch,
+                    activeServers);
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to write MCP servers config: " + configFile, exception);
         }
@@ -105,6 +112,7 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
         properties.put(PIPELINE_OUTPUT_ABSOLUTE_KEY, pipelineOutput.toString().replace('\\', '/'));
         properties.put(GIT_REPO_ABSOLUTE_KEY, gitRepoRoot.toString().replace('\\', '/'));
         properties.put(TICKETS_DIR_ABSOLUTE_KEY, ticketsDir.toString().replace('\\', '/'));
+        properties.put(FILE_REPO_ABSOLUTE_KEY, gitRepoRoot.toString().replace('\\', '/'));
 
         environment.getPropertySources().addFirst(new MapPropertySource("mcpSandbox", properties));
     }
@@ -199,30 +207,49 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
             ModuleLaunch schedulerLaunch,
             ModuleLaunch pipelineLaunch,
             ModuleLaunch gitLaunch,
-            ModuleLaunch ticketsLaunch)
+            ModuleLaunch ticketsLaunch,
+            ModuleLaunch filesLaunch,
+            java.util.Set<String> activeServers)
             throws IOException {
         ObjectNode root = objectMapper.createObjectNode();
         ObjectNode servers = objectMapper.createObjectNode();
+        boolean all = activeServers.isEmpty();
 
-        servers.set("filesystem", buildFilesystemServer(sandbox));
-        if (studyLaunch != null) {
+        if (all || activeServers.contains("filesystem")) {
+            servers.set("filesystem", buildFilesystemServer(sandbox));
+        }
+        if ((all || activeServers.contains("study")) && studyLaunch != null) {
             servers.set("study", buildJavaStdioServer(studyDb, studyLaunch, "STUDY_DB_PATH"));
         }
-        if (schedulerLaunch != null) {
+        if ((all || activeServers.contains("scheduler")) && schedulerLaunch != null) {
             servers.set("scheduler", buildJavaStdioServer(schedulerDb, schedulerLaunch, "SCHEDULER_DB_PATH"));
         }
-        if (pipelineLaunch != null) {
+        if ((all || activeServers.contains("pipeline")) && pipelineLaunch != null) {
             servers.set("pipeline", buildDirEnvStdioServer(pipelineOutput, pipelineLaunch, "PIPELINE_OUTPUT_DIR"));
         }
-        if (gitLaunch != null) {
+        if ((all || activeServers.contains("git")) && gitLaunch != null) {
             servers.set("git", buildDirEnvStdioServer(gitRepoRoot, gitLaunch, "GIT_REPO_ROOT"));
         }
-        if (ticketsLaunch != null) {
+        if ((all || activeServers.contains("tickets")) && ticketsLaunch != null) {
             servers.set("tickets", buildDirEnvStdioServer(ticketsDir, ticketsLaunch, "TICKETS_DIR"));
+        }
+        if ((all || activeServers.contains("files")) && filesLaunch != null) {
+            servers.set("files", buildDirEnvStdioServer(gitRepoRoot, filesLaunch, "FILE_REPO_ROOT"));
         }
 
         root.set("mcpServers", servers);
         objectMapper.writerWithDefaultPrettyPrinter().writeValue(configFile.toFile(), root);
+    }
+
+    private java.util.Set<String> parseActiveServers(String configured) {
+        if (configured == null || configured.isBlank()) {
+            return java.util.Set.of();
+        }
+        return java.util.Arrays.stream(configured.split(","))
+                .map(String::trim)
+                .filter(part -> !part.isEmpty())
+                .map(String::toLowerCase)
+                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
     }
 
     private ObjectNode buildFilesystemServer(Path sandbox) {
