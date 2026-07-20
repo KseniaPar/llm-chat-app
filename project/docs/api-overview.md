@@ -68,6 +68,19 @@ Frontend: `/dev.html` — не пересекается с учебным чат
 
 CI: `.github/workflows/pr-review.yml` на `pull_request` → комментарий в PR.
 
+## Ассистент поддержки (Day 33)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api/support/status` | FAQ индекс, MCP tickets, LLM |
+| GET | `/api/support/tickets` | Список JSON-тикетов |
+| PATCH | `/api/support/tickets/{id}/status` | `{ status }` — `open` / `in_progress` / `resolved` |
+| POST | `/api/support/chat` | `{ question, ticketId? }` — FAQ + контекст тикета |
+| POST | `/api/rag/support/index` | Переиндексация FAQ |
+| GET | `/api/rag/support/index/status` | Статус SUPPORT-индекса |
+
+Frontend: `/support.html`.
+
 ## Профиль
 
 | Метод | Путь | Описание |

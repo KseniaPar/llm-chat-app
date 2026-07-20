@@ -30,6 +30,7 @@ import com.example.llmchat.rag.RagDemoService;
 import com.example.llmchat.rag.RagEvalService;
 import com.example.llmchat.rag.RagLocalIndexService;
 import com.example.llmchat.rag.ProjectDocsIndexingService;
+import com.example.llmchat.rag.SupportFaqIndexingService;
 import com.example.llmchat.rag.RagIndexStore;
 import com.example.llmchat.rag.RagIndexingService;
 import com.example.llmchat.rag.RagLlmEvalService;
@@ -72,6 +73,7 @@ public class RagController {
     private final RagLocalDemoService localDemoService;
     private final RagLocalIndexService localIndexService;
     private final ProjectDocsIndexingService projectDocsIndexingService;
+    private final SupportFaqIndexingService supportFaqIndexingService;
 
     public RagController(
             RagIndexingService indexingService,
@@ -85,7 +87,8 @@ public class RagController {
             RagLlmEvalService llmEvalService,
             RagLocalDemoService localDemoService,
             RagLocalIndexService localIndexService,
-            ProjectDocsIndexingService projectDocsIndexingService) {
+            ProjectDocsIndexingService projectDocsIndexingService,
+            SupportFaqIndexingService supportFaqIndexingService) {
         this.indexingService = indexingService;
         this.indexStore = indexStore;
         this.corpusLoader = corpusLoader;
@@ -98,6 +101,7 @@ public class RagController {
         this.localDemoService = localDemoService;
         this.localIndexService = localIndexService;
         this.projectDocsIndexingService = projectDocsIndexingService;
+        this.supportFaqIndexingService = supportFaqIndexingService;
     }
 
     @PostMapping("/project/index")
@@ -113,6 +117,21 @@ public class RagController {
     @GetMapping("/project/index/status")
     public ProjectDocsIndexingService.ProjectIndexStatus projectIndexStatus() {
         return projectDocsIndexingService.status();
+    }
+
+    @PostMapping("/support/index")
+    public RagIndexResponse buildSupportIndex() {
+        log.info("POST /api/rag/support/index");
+        try {
+            return RagIndexResponse.from(supportFaqIndexingService.buildIndex());
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        }
+    }
+
+    @GetMapping("/support/index/status")
+    public SupportFaqIndexingService.SupportIndexStatus supportIndexStatus() {
+        return supportFaqIndexingService.status();
     }
 
     @GetMapping("/local/demo")

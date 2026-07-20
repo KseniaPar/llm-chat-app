@@ -49,6 +49,7 @@ Stores (SQLite) · Ollama / OpenRouter · MCP STDIO servers
 | `mcp-scheduler` | напоминания и сводки |
 | `mcp-pipeline` | search → summarize → saveToFile |
 | `mcp-git` | текущая ветка, список файлов, diff |
+| `mcp-tickets` | JSON тикеты поддержки (Day 33) |
 
 Конфиг генерируется `McpSandboxEnvironmentPostProcessor` → `data/mcp-sandbox/mcp-servers.generated.json`.
 
@@ -57,4 +58,5 @@ Stores (SQLite) · Ollama / OpenRouter · MCP STDIO servers
 - `LocalLlmPrivateService` — публичный учебный чат о православии (`/api/local-llm/service/*`)
 - `DeveloperAssistantService` — tool-calling агент (`/help`, `/api/devassist/chat`): сам вызывает `retrieveProjectDocs` + MCP git
 - `PrReviewService` — AI-ревью PR/diff (`/api/review/analyze`) + GitHub Action
+- `SupportAssistantService` — FAQ RAG + MCP JSON-тикеты (`/api/support/*`, `/support.html`)
 - `PlatformServerService` — info / verify платформы

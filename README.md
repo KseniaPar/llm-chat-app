@@ -19,7 +19,7 @@
 ollama pull nomic-embed-text
 
 # 2. MCP-серверы
-mvn -pl mcp-servers/mcp-study,mcp-servers/mcp-scheduler,mcp-servers/mcp-pipeline,mcp-servers/mcp-git -am package
+mvn -pl mcp-servers/mcp-study,mcp-servers/mcp-scheduler,mcp-servers/mcp-pipeline,mcp-servers/mcp-git,mcp-servers/mcp-tickets -am package
 
 # 3. Backend (из каталога backend) — нужен OPENROUTER_API_KEY для DevAssist
 mvn spring-boot:run
@@ -87,8 +87,23 @@ OPENROUTER_API_KEY=... node scripts/pr-review.mjs --diff pr.diff --files changed
 ```bash
 curl -s http://localhost:8080/api/review/status
 curl -s http://localhost:8080/api/review/analyze -H "Content-Type: application/json" -d "{\"title\":\"local review\",\"baseRef\":\"main\"}"
-# либо передать diff явно:
-curl -s http://localhost:8080/api/review/analyze -H "Content-Type: application/json" --data-binary "@review-request.json"
+```
+
+## Ассистент поддержки (Day 33)
+
+UI: **http://localhost:5173/support.html**
+
+- FAQ RAG: `support/faq` → `RagStack.SUPPORT`
+- Тикеты: JSON в `support/tickets` (копируются в `data/tickets`) через MCP **mcp-tickets**
+- Пример: выберите `TKT-001` и спросите «Почему не работает авторизация?»
+
+```bash
+mvn -pl mcp-servers/mcp-tickets -am package
+# backend + ollama nomic-embed-text + OPENROUTER_API_KEY
+
+curl -s http://localhost:8080/api/support/status
+curl -s http://localhost:8080/api/support/chat -H "Content-Type: application/json" \
+  -d "{\"ticketId\":\"TKT-001\",\"question\":\"Почему не работает авторизация?\"}"
 ```
 
 ## Документация

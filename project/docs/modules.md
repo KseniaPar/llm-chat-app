@@ -10,7 +10,8 @@ llm-chat-app/
     ├── mcp-study/
     ├── mcp-scheduler/
     ├── mcp-pipeline/
-    └── mcp-git/             # Day 31 — git branch / files / diff
+    ├── mcp-git/             # Day 31 — git branch / files / diff
+    └── mcp-tickets/         # Day 33 — JSON support tickets
 ```
 
 ## Пакеты `com.example.llmchat`
@@ -29,6 +30,7 @@ llm-chat-app/
 | `platform` | Info / verify платформы |
 | `rag` | Индексация, retrieval, query, project docs index |
 | `review` | Day 32 AI PR review (docs + diff → markdown) |
+| `support` | Day 33 support assistant (FAQ RAG + mcp-tickets) |
 | `task` | Task FSM, переходы, pause/resume |
 
 ## MCP tools (git) + DevAssist RAG tool

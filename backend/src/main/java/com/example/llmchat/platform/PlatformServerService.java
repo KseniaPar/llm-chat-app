@@ -152,7 +152,7 @@ public class PlatformServerService {
         return new PlatformInfoResponse(
                 platformName,
                 platformDescription,
-                "day32-platform",
+                "day33-platform",
                 activeProfiles(),
                 ready,
                 message,

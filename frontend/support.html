@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Поддержка · llm-chat-app</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/support.css">
+</head>
+<body>
+  <div class="support-app">
+    <header class="support-app__header">
+      <div class="support-app__brand">
+        <div class="support-app__logo" aria-hidden="true">sup</div>
+        <div>
+          <h1 class="support-app__title">Ассистент поддержки</h1>
+          <p id="support-tagline" class="support-app__tagline">FAQ · тикеты JSON</p>
+        </div>
+      </div>
+      <div class="support-app__header-actions">
+        <span id="support-status-pill" class="support-app__pill support-app__pill--offline">загрузка…</span>
+        <a href="/dev.html" class="support-app__link">DevAssist →</a>
+        <a href="/" class="support-app__link">На главную →</a>
+        <button id="support-new-chat-btn" class="support-app__btn" type="button">Новый диалог</button>
+      </div>
+    </header>
+
+    <div class="support-app__layout">
+      <aside class="support-app__sidebar" aria-label="Тикеты">
+        <section class="support-app__panel">
+          <h2 class="support-app__panel-title">Тикеты</h2>
+          <div id="ticket-list" class="support-app__tickets"></div>
+        </section>
+        <section class="support-app__panel">
+          <h2 class="support-app__panel-title">Статус</h2>
+          <dl class="support-app__stats">
+            <div><dt>FAQ индекс</dt><dd id="stat-faq">—</dd></div>
+            <div><dt>Документы</dt><dd id="stat-docs">—</dd></div>
+            <div><dt>Тикеты MCP</dt><dd id="stat-tickets">—</dd></div>
+            <div><dt>Последний ответ</dt><dd id="stat-last">—</dd></div>
+          </dl>
+        </section>
+        <p class="support-app__sidebar-note">
+          Выберите тикет и спросите, например: «Почему не работает авторизация?»
+        </p>
+      </aside>
+
+      <main class="support-app__main">
+        <div id="support-messages" class="support-app__messages" aria-live="polite"></div>
+        <footer class="support-app__footer">
+          <p id="support-error" class="support-app__error hidden" role="alert"></p>
+          <p id="support-ticket-label" class="support-app__ticket-label">Тикет не выбран</p>
+          <form id="support-chat-form" class="support-app__composer">
+            <textarea
+              id="support-prompt"
+              class="support-app__input"
+              rows="1"
+              placeholder="Вопрос о продукте с учётом тикета…"
+              autocomplete="off"
+            ></textarea>
+            <button id="support-send-btn" class="support-app__send" type="submit" aria-label="Отправить">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 2 11 13M22 2 15 22 11 13 2 9 22 2"/>
+              </svg>
+            </button>
+          </form>
+          <p id="support-meta" class="support-app__meta"></p>
+        </footer>
+      </main>
+    </div>
+  </div>
+  <script type="module" src="/js/support-app.js"></script>
+</body>
+</html>
