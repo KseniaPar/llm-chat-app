@@ -20,5 +20,6 @@
         <module>mcp-pipeline</module>
         <module>mcp-git</module>
         <module>mcp-tickets</module>
+        <module>mcp-files</module>
     </modules>
 </project>

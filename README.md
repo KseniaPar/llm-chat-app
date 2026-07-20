@@ -106,11 +106,28 @@ curl -s http://localhost:8080/api/support/chat -H "Content-Type: application/jso
   -d "{\"ticketId\":\"TKT-001\",\"question\":\"Почему не работает авторизация?\"}"
 ```
 
+## Файловый ассистент (Day 34)
+
+UI: **http://localhost:5173/files.html**
+
+- MCP **mcp-files**: `readFile`, `searchFiles`, `listFiles`, `writeFile` (allowlist: `project/docs/**`, `README.md`, …)
+- Цель на уровне задачи — ассистент сам ищет и читает файлы, сохраняет отчёт + diff в ответе API
+
+```bash
+mvn -pl mcp-servers/mcp-files -am package
+# backend + OPENROUTER_API_KEY
+
+curl -s http://localhost:8080/api/files/status
+curl -s http://localhost:8080/api/files/goal -H "Content-Type: application/json" \
+  -d "{\"goal\":\"Найди упоминания SupportController в backend и запиши отчёт в project/docs/usage-support.md\"}"
+```
+
 ## Документация
 
 - [Архитектура](project/docs/architecture.md)
 - [Обзор API](project/docs/api-overview.md)
 - [Модули и пакеты](project/docs/modules.md)
 - [Схема данных](project/docs/data-schema.md)
-- [AI PR Review](project/docs/pr-review.md)
+- [Поддержка](project/docs/support.md)
+- [Файловый ассистент](project/docs/file-assistant.md)
 - [Деплой VPS](deploy/vps/README.md)

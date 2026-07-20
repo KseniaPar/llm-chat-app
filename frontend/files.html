@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Файловый ассистент · llm-chat-app</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/files.css">
+</head>
+<body>
+  <div class="files-app">
+    <header class="files-app__header">
+      <div class="files-app__brand">
+        <div class="files-app__logo" aria-hidden="true">fs</div>
+        <div>
+          <h1 class="files-app__title">Файловый ассистент</h1>
+          <p id="files-tagline" class="files-app__tagline">чтение · поиск · запись</p>
+        </div>
+      </div>
+      <div class="files-app__header-actions">
+        <span id="files-status-pill" class="files-app__pill files-app__pill--offline">загрузка…</span>
+        <a href="/dev.html" class="files-app__link">DevAssist →</a>
+        <a href="/support.html" class="files-app__link">Support →</a>
+        <a href="/" class="files-app__link">На главную →</a>
+        <button id="files-new-btn" class="files-app__btn" type="button">Новая задача</button>
+      </div>
+    </header>
+
+    <div class="files-app__layout">
+      <aside class="files-app__sidebar" aria-label="Контекст">
+        <section class="files-app__panel">
+          <h2 class="files-app__panel-title">Репозиторий</h2>
+          <dl class="files-app__stats">
+            <div><dt>Корень</dt><dd id="stat-repo" class="files-app__mono-truncate">—</dd></div>
+            <div><dt>MCP files</dt><dd id="stat-mcp">—</dd></div>
+            <div><dt>Запись</dt><dd id="stat-write">allowlist</dd></div>
+            <div><dt>Последняя задача</dt><dd id="stat-last">—</dd></div>
+          </dl>
+        </section>
+        <section class="files-app__panel">
+          <h2 class="files-app__panel-title">Изменённые файлы</h2>
+          <ul id="applied-list" class="files-app__applied"></ul>
+        </section>
+        <section class="files-app__panel">
+          <h2 class="files-app__panel-title">Diff</h2>
+          <pre id="diff-panel" class="files-app__diff">—</pre>
+        </section>
+      </aside>
+
+      <main class="files-app__main">
+        <div id="files-messages" class="files-app__messages" aria-live="polite"></div>
+        <footer class="files-app__footer">
+          <p id="files-error" class="files-app__error hidden" role="alert"></p>
+          <form id="files-goal-form" class="files-app__composer">
+            <label class="files-app__dry-run">
+              <input id="files-dry-run" type="checkbox">
+              <span>dry run (только diff)</span>
+            </label>
+            <div class="files-app__composer-row">
+              <textarea
+                id="files-goal"
+                class="files-app__input"
+                rows="2"
+                placeholder="Цель на уровне задачи, например: найди все упоминания SupportController и запиши отчёт в project/docs/usage-support.md"
+                autocomplete="off"
+              ></textarea>
+              <button id="files-send-btn" class="files-app__send" type="submit" aria-label="Выполнить">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 2 11 13M22 2 15 22 11 13 2 9 22 2"/>
+                </svg>
+              </button>
+            </div>
+          </form>
+          <p id="files-meta" class="files-app__meta"></p>
+        </footer>
+      </main>
+    </div>
+  </div>
+  <script type="module" src="/js/files-app.js"></script>
+</body>
+</html>

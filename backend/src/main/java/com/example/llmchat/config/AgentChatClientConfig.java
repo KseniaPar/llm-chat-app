@@ -28,6 +28,7 @@ public class AgentChatClientConfig {
     public static final String SCHEDULER_SERVER_NAME = "mcp-scheduler";
     public static final String GIT_SERVER_NAME = "mcp-git";
     public static final String TICKETS_SERVER_NAME = "mcp-tickets";
+    public static final String FILES_SERVER_NAME = "mcp-files";
     private static final Set<String> AGENT_MCP_SERVER_NAMES = Set.of(
             STUDY_SERVER_NAME, PIPELINE_SERVER_NAME, SCHEDULER_SERVER_NAME, GIT_SERVER_NAME);
     private static final Set<String> AGENT_EXCLUDED_TOOL_NAMES = Set.of(

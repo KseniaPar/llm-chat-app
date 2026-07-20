@@ -1,0 +1,12 @@
+spring:
+  main:
+    web-application-type: none
+  ai:
+    mcp:
+      server:
+        name: mcp-files
+        version: 0.0.1
+
+files:
+  repo:
+    root: ${FILE_REPO_ROOT:}

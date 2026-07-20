@@ -81,6 +81,15 @@ CI: `.github/workflows/pr-review.yml` на `pull_request` → комментар
 
 Frontend: `/support.html`.
 
+## Файловый ассистент (Day 34)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api/files/status` | MCP mcp-files, repo root, write allowlist |
+| POST | `/api/files/goal` | `{ goal, dryRun? }` — поиск/чтение/запись файлов + diff |
+
+Frontend: `/files.html`.
+
 ## Профиль
 
 | Метод | Путь | Описание |

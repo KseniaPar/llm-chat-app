@@ -9,6 +9,7 @@
 | mcp-pipeline | search → summarize → save |
 | mcp-git | ветка / файлы / diff (Day 31) |
 | mcp-tickets | JSON-тикеты поддержки (Day 33) |
+| mcp-files | чтение / поиск / запись файлов проекта (Day 34) |
 
 Конфиг генерируется в `data/mcp-sandbox/mcp-servers.generated.json`.
 
@@ -18,7 +19,13 @@
 2. Backend запущен не из каталога `backend/` — PostProcessor не находит `../mcp-servers/.../target`.
 3. Нужен перезапуск после первой сборки.
 
-Проверка: `GET /api/mcp/tools` — должны быть `getCurrentBranch`, `listTickets`, `getTicket`.
+Проверка: `GET /api/mcp/tools` — должны быть `getCurrentBranch`, `listTickets`, `getTicket`, `readFile`, `writeFile`.
+
+## mcp-files (Day 34)
+
+Tools: `readFile`, `searchFiles`, `listFiles`, `writeFile`.
+Запись только в allowlist (`project/docs/**`, `README.md`, …).
+UI: `/files.html`, API: `POST /api/files/goal`.
 
 ## mcp-tickets
 
