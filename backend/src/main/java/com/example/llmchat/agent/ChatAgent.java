@@ -1,5 +1,6 @@
 package com.example.llmchat.agent;
 
+import com.example.llmchat.devassist.DeveloperAssistantService;
 import com.example.llmchat.dto.AgentChatMessage;
 import com.example.llmchat.dto.AgentRequest;
 import com.example.llmchat.dto.AgentResponse;
@@ -56,6 +57,7 @@ public class ChatAgent {
     private final InvariantsService invariantsService;
     private final PersonalizationService personalizationService;
     private final McpOrchestrationService orchestrationService;
+    private final DeveloperAssistantService developerAssistantService;
     private final double temperature;
     private final int maxTokens;
 
@@ -77,6 +79,7 @@ public class ChatAgent {
             InvariantsService invariantsService,
             PersonalizationService personalizationService,
             McpOrchestrationService orchestrationService,
+            DeveloperAssistantService developerAssistantService,
             @Value("${app.agent.temperature}") double temperature,
             @Value("${app.agent.max-tokens}") int maxTokens) {
         this.openRouterHttpClient = openRouterHttpClient;
@@ -96,6 +99,7 @@ public class ChatAgent {
         this.invariantsService = invariantsService;
         this.personalizationService = personalizationService;
         this.orchestrationService = orchestrationService;
+        this.developerAssistantService = developerAssistantService;
         this.temperature = temperature;
         this.maxTokens = maxTokens;
     }
@@ -119,6 +123,10 @@ public class ChatAgent {
 
         String activeSessionId = sessionId;
         boolean agentDrivenMcp = Boolean.TRUE.equals(request.agentDrivenMcp());
+
+        if (DeveloperAssistantService.isHelpCommand(prompt)) {
+            return runDeveloperHelp(userId, sessionId, activeSessionId, prompt, strategy);
+        }
 
         if (!agentDrivenMcp && McpOrchestrationPromptDetector.isExamPrepOrchestration(prompt)) {
             return runOrchestrationTurn(userId, activeSessionId, prompt, strategy);
@@ -395,6 +403,86 @@ public class ChatAgent {
         if (result.newState() != null) {
             logs.addAll(taskStateService.buildTaskStateLogs(result.newState(), result.accepted() && acceptedPrefix != null));
         }
+    }
+
+    private AgentResponse runDeveloperHelp(
+            String userId,
+            String sessionId,
+            String activeSessionId,
+            String prompt,
+            ContextStrategy strategy) {
+        DeveloperAssistantService.HelpAnswer help = developerAssistantService.answer(prompt);
+        String answer = help.answer();
+
+        List<String> logs = new ArrayList<>(help.logs());
+        for (McpToolCallLogDto call : help.mcpToolCalls()) {
+            logs.add("MCP tool: " + call.serverName() + "/" + call.toolName() + " (" + call.durationMs() + " ms)");
+        }
+        if (!help.sources().isEmpty()) {
+            logs.add("RAG sources: " + String.join(", ", help.sources()));
+        }
+
+        conversationStore.append(activeSessionId, "user", prompt);
+        conversationStore.append(activeSessionId, "assistant", answer);
+        contextStrategyService.afterUserMessage(activeSessionId, strategy, prompt);
+        contextStrategyService.afterAssistantMessage(activeSessionId, strategy);
+
+        MemoryContextSnapshot memorySnapshot = memoryManager.buildContextSnapshot(
+                userId, activeSessionId, strategy);
+        TaskStateSnapshot taskSnapshot = taskStateService.toSnapshot(
+                taskStateService.getState(activeSessionId).orElse(null),
+                taskStateService.getState(activeSessionId).isPresent());
+
+        int promptTokens = tokenCounter.estimateTextTokens(prompt);
+        int responseTokens = tokenCounter.estimateTextTokens(answer);
+        TokenStats tokenStats = new TokenStats(
+                promptTokens,
+                0,
+                promptTokens + responseTokens,
+                0,
+                responseTokens,
+                promptTokens + responseTokens,
+                0,
+                0,
+                0,
+                0.0,
+                0.0,
+                tokenCounter.contextWindow(),
+                tokenCounter.contextWindow(),
+                false,
+                false,
+                false,
+                false,
+                0,
+                0,
+                0,
+                null,
+                strategy.name(),
+                0,
+                0,
+                contextStrategyService.windowSize(),
+                conversationStore.getStoredMessageCount(activeSessionId));
+
+        UserProfile profile = personalizationService.getProfile(userId);
+        return new AgentResponse(
+                answer,
+                sessionId,
+                List.copyOf(logs),
+                tokenStats,
+                memorySnapshot,
+                List.of("SHORT → user: /help", "SHORT → assistant: developer assist"),
+                new UserProfileSnapshot(
+                        profile.displayName(),
+                        profile.responseStyle(),
+                        profile.responseFormat(),
+                        profile.constraints(),
+                        false),
+                List.of("PERSONALIZATION → пропущена — /help"),
+                taskSnapshot,
+                List.of("TASK → пропущен — /help"),
+                new InvariantsSnapshot(0, List.of(), false, List.of()),
+                List.of("INVARIANTS → пропущены — /help"),
+                List.copyOf(help.mcpToolCalls()));
     }
 
     private AgentResponse runOrchestrationTurn(

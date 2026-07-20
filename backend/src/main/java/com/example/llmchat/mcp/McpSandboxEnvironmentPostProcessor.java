@@ -19,7 +19,8 @@ import java.util.stream.Stream;
 
 /**
  * Prepares MCP sandbox directory and generates Claude Desktop-style stdio config
- * for filesystem (Day 16), mcp-study (Day 17), mcp-scheduler (Day 18), and mcp-pipeline (Day 19).
+ * for filesystem (Day 16), mcp-study (Day 17), mcp-scheduler (Day 18), mcp-pipeline (Day 19),
+ * and mcp-git (Day 31).
  */
 public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProcessor {
 
@@ -29,6 +30,7 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
     private static final String STUDY_DB_ABSOLUTE_KEY = "app.mcp.study-db.absolute";
     private static final String SCHEDULER_DB_ABSOLUTE_KEY = "app.mcp.scheduler-db.absolute";
     private static final String PIPELINE_OUTPUT_ABSOLUTE_KEY = "app.mcp.pipeline-output.absolute";
+    private static final String GIT_REPO_ABSOLUTE_KEY = "app.mcp.git-repo.absolute";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -39,6 +41,7 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
         Path studyDb = Paths.get("data/study-reference.db").toAbsolutePath().normalize();
         Path schedulerDb = Paths.get("data/scheduler.db").toAbsolutePath().normalize();
         Path pipelineOutput = Paths.get("data/pipeline").toAbsolutePath().normalize();
+        Path gitRepoRoot = resolveGitRepoRoot();
         try {
             Files.createDirectories(sandbox);
             Path readme = sandbox.resolve("readme.txt");
@@ -68,8 +71,19 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
                 resolveModuleLaunch("mcp-scheduler", "com.example.mcp.scheduler.SchedulerMcpApplication");
         ModuleLaunch pipelineLaunch =
                 resolveModuleLaunch("mcp-pipeline", "com.example.mcp.pipeline.PipelineMcpApplication");
+        ModuleLaunch gitLaunch = resolveModuleLaunch("mcp-git", "com.example.mcp.git.GitMcpApplication");
         try {
-            writeServersConfig(configFile, sandbox, studyDb, schedulerDb, pipelineOutput, studyLaunch, schedulerLaunch, pipelineLaunch);
+            writeServersConfig(
+                    configFile,
+                    sandbox,
+                    studyDb,
+                    schedulerDb,
+                    pipelineOutput,
+                    gitRepoRoot,
+                    studyLaunch,
+                    schedulerLaunch,
+                    pipelineLaunch,
+                    gitLaunch);
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to write MCP servers config: " + configFile, exception);
         }
@@ -80,8 +94,31 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
         properties.put(STUDY_DB_ABSOLUTE_KEY, studyDb.toString().replace('\\', '/'));
         properties.put(SCHEDULER_DB_ABSOLUTE_KEY, schedulerDb.toString().replace('\\', '/'));
         properties.put(PIPELINE_OUTPUT_ABSOLUTE_KEY, pipelineOutput.toString().replace('\\', '/'));
+        properties.put(GIT_REPO_ABSOLUTE_KEY, gitRepoRoot.toString().replace('\\', '/'));
 
         environment.getPropertySources().addFirst(new MapPropertySource("mcpSandbox", properties));
+    }
+
+    private Path resolveGitRepoRoot() {
+        Path cwd = Paths.get("").toAbsolutePath().normalize();
+        Path[] candidates = {
+                cwd,
+                cwd.getParent(),
+                Paths.get("..").toAbsolutePath().normalize()
+        };
+        for (Path candidate : candidates) {
+            if (candidate != null && Files.isDirectory(candidate.resolve(".git"))) {
+                return candidate;
+            }
+            if (candidate != null
+                    && Files.isRegularFile(candidate.resolve("pom.xml"))
+                    && Files.isDirectory(candidate.resolve("backend"))
+                    && Files.isDirectory(candidate.resolve("mcp-servers"))) {
+                return candidate;
+            }
+        }
+        Path parent = cwd.getParent();
+        return parent != null ? parent : cwd;
     }
 
     private ModuleLaunch resolveModuleLaunch(String moduleName, String mainClass) {
@@ -126,9 +163,11 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
             Path studyDb,
             Path schedulerDb,
             Path pipelineOutput,
+            Path gitRepoRoot,
             ModuleLaunch studyLaunch,
             ModuleLaunch schedulerLaunch,
-            ModuleLaunch pipelineLaunch)
+            ModuleLaunch pipelineLaunch,
+            ModuleLaunch gitLaunch)
             throws IOException {
         ObjectNode root = objectMapper.createObjectNode();
         ObjectNode servers = objectMapper.createObjectNode();
@@ -142,6 +181,9 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
         }
         if (pipelineLaunch != null) {
             servers.set("pipeline", buildPipelineStdioServer(pipelineOutput, pipelineLaunch));
+        }
+        if (gitLaunch != null) {
+            servers.set("git", buildGitStdioServer(gitRepoRoot, gitLaunch));
         }
 
         root.set("mcpServers", servers);
@@ -229,6 +271,38 @@ public class McpSandboxEnvironmentPostProcessor implements EnvironmentPostProces
 
         ObjectNode env = objectMapper.createObjectNode();
         env.put("PIPELINE_OUTPUT_DIR", outputDir.toAbsolutePath().normalize().toString());
+        env.put("JAVA_TOOL_OPTIONS", "-Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8");
+        server.set("env", env);
+        server.set("args", args);
+        return server;
+    }
+
+    private ObjectNode buildGitStdioServer(Path repoRoot, ModuleLaunch launch) {
+        ObjectNode server = objectMapper.createObjectNode();
+        ArrayNode args = objectMapper.createArrayNode();
+        server.put("command", "java");
+
+        ArrayNode jvmArgs = objectMapper.createArrayNode();
+        jvmArgs.add("-Dfile.encoding=UTF-8");
+        jvmArgs.add("-Dsun.jnu.encoding=UTF-8");
+
+        if (launch.jarPath() != null) {
+            for (var flag : jvmArgs) {
+                args.add(flag.asText());
+            }
+            args.add("-jar");
+            args.add(launch.jarPath().toAbsolutePath().normalize().toString());
+        } else {
+            for (var flag : jvmArgs) {
+                args.add(flag.asText());
+            }
+            args.add("-cp");
+            args.add(launch.classpath());
+            args.add(launch.mainClass());
+        }
+
+        ObjectNode env = objectMapper.createObjectNode();
+        env.put("GIT_REPO_ROOT", repoRoot.toAbsolutePath().normalize().toString());
         env.put("JAVA_TOOL_OPTIONS", "-Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8");
         server.set("env", env);
         server.set("args", args);

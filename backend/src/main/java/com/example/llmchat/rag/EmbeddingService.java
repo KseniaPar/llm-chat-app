@@ -95,7 +95,7 @@ public class EmbeddingService {
         if (text == null || text.isBlank()) {
             return EmbedResult.keywordFallback("Пустой запрос.");
         }
-        if (stack == RagStack.LOCAL) {
+        if (stack == RagStack.LOCAL || stack == RagStack.PROJECT) {
             return embedLocal(text);
         }
         return embedCloudQuery(text);
@@ -105,7 +105,7 @@ public class EmbeddingService {
         if (texts.isEmpty()) {
             return List.of();
         }
-        if (stack == RagStack.LOCAL) {
+        if (stack == RagStack.LOCAL || stack == RagStack.PROJECT) {
             ensureLocalEmbeddingReady();
             List<float[]> all = new ArrayList<>(texts.size());
             for (int start = 0; start < texts.size(); start += batchSize) {

@@ -18,5 +18,6 @@
         <module>mcp-study</module>
         <module>mcp-scheduler</module>
         <module>mcp-pipeline</module>
+        <module>mcp-git</module>
     </modules>
 </project>

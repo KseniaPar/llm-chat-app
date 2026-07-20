@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ассистент разработчика · llm-chat-app</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/dev-assist.css">
+</head>
+<body>
+  <div class="dev-app">
+    <header class="dev-app__header">
+      <div class="dev-app__brand">
+        <div class="dev-app__logo" aria-hidden="true">dev</div>
+        <div>
+          <h1 class="dev-app__title">Ассистент разработчика</h1>
+          <p id="dev-tagline" class="dev-app__tagline">документация проекта · llm-chat-app</p>
+        </div>
+      </div>
+      <div class="dev-app__header-actions">
+        <span id="dev-status-pill" class="dev-app__pill dev-app__pill--offline">загрузка…</span>
+        <a href="/" class="dev-app__link">На главную →</a>
+        <button id="dev-new-chat-btn" class="dev-app__btn" type="button">Новый диалог</button>
+      </div>
+    </header>
+
+    <div class="dev-app__layout">
+      <aside class="dev-app__sidebar" aria-label="Контекст проекта">
+        <section class="dev-app__panel">
+          <h2 class="dev-app__panel-title">Проект</h2>
+          <dl class="dev-app__stats">
+            <div><dt>Ветка</dt><dd id="stat-branch">—</dd></div>
+            <div><dt>Commit</dt><dd id="stat-commit">—</dd></div>
+            <div><dt>Документы в индексе</dt><dd id="stat-docs">—</dd></div>
+            <div><dt>Фрагменты</dt><dd id="stat-chunks">—</dd></div>
+            <div><dt>Индекс</dt><dd id="stat-rag">—</dd></div>
+            <div><dt>Последний ответ</dt><dd id="stat-last">—</dd></div>
+          </dl>
+        </section>
+        <p class="dev-app__sidebar-note">
+          Отвечает по <code>README.md</code> и <code>project/docs</code>.
+          При необходимости сам смотрит список файлов и diff в репозитории.
+        </p>
+      </aside>
+
+      <main class="dev-app__main">
+        <div id="dev-messages" class="dev-app__messages" aria-live="polite"></div>
+        <footer class="dev-app__footer">
+          <p id="dev-error" class="dev-app__error hidden" role="alert"></p>
+          <form id="dev-chat-form" class="dev-app__composer">
+            <textarea
+              id="dev-prompt"
+              class="dev-app__input"
+              rows="1"
+              placeholder="Спросите о модулях, API, схеме БД, ветке или изменениях…"
+              autocomplete="off"
+            ></textarea>
+            <button id="dev-send-btn" class="dev-app__send" type="submit" aria-label="Отправить">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 2 11 13M22 2 15 22 11 13 2 9 22 2"/>
+              </svg>
+            </button>
+          </form>
+          <p id="dev-meta" class="dev-app__meta"></p>
+        </footer>
+      </main>
+    </div>
+  </div>
+  <script type="module" src="/js/dev-app.js"></script>
+</body>
+</html>
