@@ -45,6 +45,10 @@ app:
     api-key: ${OPENROUTER_API_KEY:local-llm-not-used}
     base-url: https://openrouter.ai/api
     model: openai/gpt-4o-mini
+  review:
+    use-project-rag: true
+    temperature: 0.2
+    max-tokens: 1800
   devassist:
     llm-provider: cloud
     max-tokens: 1024

@@ -28,6 +28,7 @@ llm-chat-app/
 | `personalization` | Профиль пользователя |
 | `platform` | Info / verify платформы |
 | `rag` | Индексация, retrieval, query, project docs index |
+| `review` | Day 32 AI PR review (docs + diff → markdown) |
 | `task` | Task FSM, переходы, pause/resume |
 
 ## MCP tools (git) + DevAssist RAG tool
